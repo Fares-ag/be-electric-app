@@ -4,12 +4,9 @@ import 'package:cmms_core/models/purchase_order.dart';
 import 'package:cmms_core/services/supabase_database_service.dart';
 import 'package:cmms_core/services/parts_request_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/locator.dart';
 
 class PurchaseOrderService {
-  factory PurchaseOrderService() => _instance;
-  PurchaseOrderService._internal();
-  static final PurchaseOrderService _instance =
-      PurchaseOrderService._internal();
 
   late SharedPreferences _prefs;
 
@@ -69,7 +66,7 @@ class PurchaseOrderService {
     String? vendorPhone,
     String? notes,
   }) async {
-    final partsRequestService = PartsRequestService();
+    final partsRequestService = sl<PartsRequestService>();
     final items = <PurchaseOrderItem>[];
 
     for (final requestId in partsRequestIds) {
@@ -309,16 +306,16 @@ class PurchaseOrderService {
   Future<PurchaseOrder> _enrichPurchaseOrder(PurchaseOrder order) async {
     // Use Firestore to fetch related objects
     final creator = order.createdBy != null
-        ? await SupabaseDatabaseService.instance.getUserById(order.createdBy!)
+        ? await sl<SupabaseDatabaseService>().getUserById(order.createdBy!)
         : null;
     final approver = order.approvedBy != null
-        ? await SupabaseDatabaseService.instance.getUserById(order.approvedBy!)
+        ? await sl<SupabaseDatabaseService>().getUserById(order.approvedBy!)
         : null;
 
     // Enrich items with inventory item details
     final enrichedItems = <PurchaseOrderItem>[];
     for (final item in order.items) {
-      final inventoryItem = await SupabaseDatabaseService.instance
+      final inventoryItem = await sl<SupabaseDatabaseService>()
           .getInventoryItem(item.inventoryItemId);
       enrichedItems.add(
         PurchaseOrderItem(

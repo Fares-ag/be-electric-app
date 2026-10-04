@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/release_safety.dart';
 import '../models/asset.dart';
 import '../providers/auth_provider.dart';
 import '../screens/admin/seed_general_assets_screen.dart';
@@ -11,6 +12,8 @@ import '../services/hybrid_dam_service.dart';
 import '../theme/unified_design_system.dart';
 import '../utils/app_theme.dart';
 import 'enhanced_asset_display_widget.dart';
+import '../config/locator.dart';
+import '../utils/user_facing_errors.dart';
 
 class EnhancedAssetSelectionWidget extends StatefulWidget {
   const EnhancedAssetSelectionWidget({
@@ -37,7 +40,7 @@ class EnhancedAssetSelectionWidget extends StatefulWidget {
 class _EnhancedAssetSelectionWidgetState
     extends State<EnhancedAssetSelectionWidget> {
   final TextEditingController _searchController = TextEditingController();
-  final HybridDamService _hybridService = HybridDamService();
+  final HybridDamService _hybridService = sl<HybridDamService>();
 
   List<Asset> _allAssets = [];
   List<Asset> _filteredAssets = [];
@@ -89,14 +92,16 @@ class _EnhancedAssetSelectionWidgetState
       }
 
       _applyFilters();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Error loading assets: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading assets: $e'),
-            backgroundColor: Colors.red,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load assets. Please try again.',
+          stackTrace: st,
+          contextLabel: 'enhanced_asset_selection_widget: Could not load assets. Please ',
+          backgroundColor: Colors.red,
         );
       }
     } finally {
@@ -502,28 +507,29 @@ class _EnhancedAssetSelectionWidgetState
               ),
             ),
             const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const SeedGeneralAssetsScreen(),
+            if (ReleaseSafety.allowDataSeeding)
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SeedGeneralAssetsScreen(),
+                    ),
+                  );
+                  // Reload assets after returning
+                  _loadAssets();
+                },
+                icon: const Icon(Icons.add_circle_outline),
+                label: const Text('Setup Facility Assets'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.accentOrange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
                   ),
-                );
-                // Reload assets after returning
-                _loadAssets();
-              },
-              icon: const Icon(Icons.add_circle_outline),
-              label: const Text('Setup Facility Assets'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accentOrange,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 16,
                 ),
               ),
-            ),
             const SizedBox(height: 8),
             TextButton(
               onPressed: () {
@@ -583,33 +589,34 @@ class _EnhancedAssetSelectionWidgetState
               ),
             ),
             const SizedBox(width: 8),
-            TextButton(
-              onPressed: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const SeedGeneralAssetsScreen(),
+            if (ReleaseSafety.allowDataSeeding)
+              TextButton(
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SeedGeneralAssetsScreen(),
+                    ),
+                  );
+                  // Reload assets after returning
+                  _loadAssets();
+                },
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.orange[600],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
                   ),
-                );
-                // Reload assets after returning
-                _loadAssets();
-              },
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.orange[600],
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
+                ),
+                child: const Text(
+                  'Setup',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-              child: const Text(
-                'Setup',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
           ],
         ),
       );

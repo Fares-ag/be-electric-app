@@ -3,17 +3,23 @@ import 'dart:async' show unawaited;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/release_safety.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/offline_service_access.dart';
 import '../../utils/responsive_layout.dart';
+import '../../utils/user_facing_errors.dart';
 import '../../widgets/mobile_qr_scanner_widget.dart';
+import '../../widgets/offline_sync_indicators.dart';
+import '../../widgets/quick_create_menu_sheet.dart';
 import '../admin/seed_general_assets_screen.dart';
 import '../analytics/consolidated_analytics_dashboard.dart';
 import '../inventory/parts_request_screen.dart';
-import '../profile/user_profile_screen.dart';
 import '../pm_tasks/create_pm_task_screen.dart';
-import '../pm_tasks/pm_task_list_screen.dart';
+import '../pm_tasks/pm_technician_inbox_screen.dart';
+import '../profile/user_profile_screen.dart';
+import '../settings/sync_queue_status_screen.dart';
 import '../work_orders/create_work_request_screen.dart';
 import '../work_orders/work_order_list_screen.dart';
 
@@ -48,8 +54,14 @@ class _TechnicianMainScreenState extends State<TechnicianMainScreen>
     if (state == AppLifecycleState.resumed) {
       final unified =
           Provider.of<UnifiedDataProvider>(context, listen: false);
-      unawaited(unified.refreshAll());
+      unawaited(_onResumeSync(unified));
     }
+  }
+
+  Future<void> _onResumeSync(UnifiedDataProvider unified) async {
+    await resolveConnectivityService().refresh();
+    await resolveOfflineQueueService().processQueue();
+    await unified.refreshTechnicianSurface();
   }
 
   void _loadTechnicianData() {
@@ -75,13 +87,15 @@ class _TechnicianMainScreenState extends State<TechnicianMainScreen>
         // Show asset information and related maintenance tasks
         _showAssetMaintenanceInfo(result);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error scanning QR code: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not scan QR code. Please try again.',
+          stackTrace: st,
+          contextLabel: 'TechnicianMain: scan QR',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -156,72 +170,30 @@ class _TechnicianMainScreenState extends State<TechnicianMainScreen>
   }
 
   void _showQuickCreateMenu() {
+    final canCreatePmTask =
+        Provider.of<AuthProvider>(context, listen: false).currentUser?.canCreatePmTasks ??
+            false;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.surfaceColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.radiusL)),
       ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppTheme.spacingM,
-                AppTheme.spacingL,
-                AppTheme.spacingM,
-                AppTheme.spacingS,
-              ),
-              child: Text(
-                'Quick Create',
-                style: AppTheme.heading2.copyWith(color: AppTheme.darkTextColor),
-              ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.build_circle_outlined, color: AppTheme.accentGreen),
-              title: const Text('Create Work Order'),
-              subtitle: const Text('Report a new issue or maintenance need'),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: AppTheme.spacingM,
-                vertical: AppTheme.spacingXS,
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _navigateToCreateWorkOrder();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.schedule_outlined, color: AppTheme.accentOrange),
-              title: const Text('Create PM Task'),
-              subtitle: const Text('Schedule preventive maintenance'),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: AppTheme.spacingM,
-                vertical: AppTheme.spacingXS,
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _navigateToCreatePMTask();
-              },
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.qr_code_scanner, color: AppTheme.accentGreen),
-              title: const Text('Scan QR Code'),
-              subtitle: const Text('Scan asset QR to create task'),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: AppTheme.spacingM,
-                vertical: AppTheme.spacingXS,
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _scanQRCode();
-              },
-            ),
-            const SizedBox(height: AppTheme.spacingM),
-          ],
-        ),
+      builder: (context) => QuickCreateMenuSheet(
+        canCreatePmTask: canCreatePmTask,
+        onCreateWorkOrder: () {
+          Navigator.pop(context);
+          _navigateToCreateWorkOrder();
+        },
+        onCreatePmTask: () {
+          Navigator.pop(context);
+          _navigateToCreatePMTask();
+        },
+        onScanQr: () {
+          Navigator.pop(context);
+          _scanQRCode();
+        },
       ),
     );
   }
@@ -458,7 +430,15 @@ class _TechnicianMainScreenState extends State<TechnicianMainScreen>
                     builder: (context) => const UserProfileScreen(),
                   ),
                 );
+              } else if (value == 'sync_queue') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const SyncQueueStatusScreen(),
+                  ),
+                );
               } else if (value == 'seed_assets') {
+                if (!ReleaseSafety.allowDataSeeding) return;
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -478,17 +458,28 @@ class _TechnicianMainScreenState extends State<TechnicianMainScreen>
                   ],
                 ),
               ),
-              const PopupMenuDivider(),
               const PopupMenuItem(
-                value: 'seed_assets',
+                value: 'sync_queue',
                 child: Row(
                   children: [
-                    Icon(Icons.construction, color: AppTheme.accentGreen),
+                    Icon(Icons.cloud_sync_outlined, color: AppTheme.accentGreen),
                     SizedBox(width: AppTheme.spacingS),
-                    Text('Setup General Assets'),
+                    Text('Sync queue'),
                   ],
                 ),
               ),
+              const PopupMenuDivider(),
+              if (ReleaseSafety.allowDataSeeding)
+                const PopupMenuItem(
+                  value: 'seed_assets',
+                  child: Row(
+                    children: [
+                      Icon(Icons.construction, color: AppTheme.accentGreen),
+                      SizedBox(width: AppTheme.spacingS),
+                      Text('Setup General Assets'),
+                    ],
+                  ),
+                ),
               const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'logout',
@@ -505,13 +496,20 @@ class _TechnicianMainScreenState extends State<TechnicianMainScreen>
         ],
       ),
       body: SafeArea(
-        child: IndexedStack(
-          index: _currentIndex,
+        child: Column(
           children: [
-            _buildDashboardTab(user),
-            _buildWorkOrdersTab(),
-            _buildPMTasksTab(),
-            _buildAnalyticsTab(),
+            const OfflineSyncGlobalBanner(),
+            Expanded(
+              child: IndexedStack(
+                index: _currentIndex,
+                children: [
+                  _buildDashboardTab(user),
+                  _buildWorkOrdersTab(),
+                  _buildPMTasksTab(),
+                  _buildAnalyticsTab(),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -850,7 +848,7 @@ class _TechnicianMainScreenState extends State<TechnicianMainScreen>
         },
       );
 
-  Widget _buildPMTasksTab() => const PMTaskListScreen(isTechnicianView: true);
+  Widget _buildPMTasksTab() => const PmTechnicianInboxScreen();
 
   Widget _buildAnalyticsTab() =>
       const ConsolidatedAnalyticsDashboard(isTechnicianView: true);

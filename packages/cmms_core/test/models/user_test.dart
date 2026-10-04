@@ -172,6 +172,49 @@ void main() {
       expect(user.isActive, true); // Default value
     });
 
+    test('canCreatePmTasks matches pm_tasks INSERT RLS roles', () {
+      expect(
+        User(
+          id: 't',
+          email: 't@test.com',
+          name: 'Tech',
+          role: 'technician',
+          createdAt: DateTime(2024),
+        ).canCreatePmTasks,
+        isFalse,
+      );
+      expect(
+        User(
+          id: 'r',
+          email: 'r@test.com',
+          name: 'Req',
+          role: 'requestor',
+          createdAt: DateTime(2024),
+        ).canCreatePmTasks,
+        isFalse,
+      );
+      expect(
+        User(
+          id: 'm',
+          email: 'm@test.com',
+          name: 'Mgr',
+          role: 'manager',
+          createdAt: DateTime(2024),
+        ).canCreatePmTasks,
+        isTrue,
+      );
+      expect(
+        User(
+          id: 'a',
+          email: 'a@test.com',
+          name: 'Adm',
+          role: 'admin',
+          createdAt: DateTime(2024),
+        ).canCreatePmTasks,
+        isTrue,
+      );
+    });
+
     test('Admin role change: updated user has new role and same id', () {
       // Simulates building the "updated" user when admin changes role in UI
       const originalId = 'e7fd2cfe-3928-4a3f-81cf-437a7178be6c';

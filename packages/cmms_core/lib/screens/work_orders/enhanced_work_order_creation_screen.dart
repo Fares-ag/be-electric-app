@@ -13,6 +13,7 @@ import '../../utils/app_theme.dart';
 import '../../widgets/enhanced_asset_display_widget.dart';
 import '../../widgets/enhanced_asset_selection_widget.dart';
 import '../assets/asset_detail_screen.dart';
+import '../../utils/user_facing_errors.dart';
 
 class EnhancedWorkOrderCreationScreen extends StatefulWidget {
   const EnhancedWorkOrderCreationScreen({super.key});
@@ -321,13 +322,15 @@ class _EnhancedWorkOrderCreationScreenState
         );
         Navigator.pop(context);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating work order: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not create work order. Please try again.',
+          stackTrace: st,
+          contextLabel: 'enhanced_work_order_creation_screen: Could not create work order. P',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {

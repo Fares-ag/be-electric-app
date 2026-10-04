@@ -44,7 +44,7 @@ class _IndividualTechnicianDashboardState
       print(
         'ðŸ“Š Individual Technician Dashboard: Loaded data for ${widget.technician.name}',
       );
-    } catch (e) {
+    } catch (e, st) {
       print('Error loading technician data: $e');
     }
   }

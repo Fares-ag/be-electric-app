@@ -35,3 +35,11 @@ SELECT
 FROM pg_publication_tables
 WHERE pubname = 'supabase_realtime'
   AND tablename = 'work_orders';
+
+-- Be Electric Support (Know How / Commissioning)
+SELECT
+  'support_requests_table' AS check,
+  CASE
+    WHEN to_regclass('public.support_requests') IS NOT NULL THEN 'OK'
+    ELSE 'MISSING — run ./scripts/db.sh migrate-support'
+  END AS status;

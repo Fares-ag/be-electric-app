@@ -3,6 +3,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
+import 'package:cmms_core/config/service_locator.dart';
+import 'package:cmms_core/services/unified_data_service.dart';
+
+/// Ensures GetIt is configured for tests that construct providers or services.
+Future<void> ensureServiceLocatorForTests() async {
+  if (!getIt.isRegistered<UnifiedDataService>()) {
+    await setupServiceLocator();
+  }
+}
+
+/// Resets GetIt after tests. Call in tearDownAll when using [ensureServiceLocatorForTests].
+Future<void> tearDownServiceLocatorForTests() async {
+  await resetServiceLocator();
+}
+
+/// Replace a registered service with a mock (call after [setupServiceLocator]).
+void registerMock<T extends Object>(T mock) {
+  if (getIt.isRegistered<T>()) {
+    getIt.unregister<T>();
+  }
+  getIt.registerLazySingleton<T>(() => mock);
+}
+
 /// Mock navigation observer for testing navigation
 class MockNavigatorObserver extends NavigatorObserver {
   final List<Route<dynamic>> routes = [];

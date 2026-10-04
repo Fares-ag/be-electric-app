@@ -317,7 +317,7 @@ class SecurityUtils {
     try {
       final uri = Uri.parse(url);
       return uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https');
-    } catch (e) {
+    } catch (e, st) {
       return false;
     }
   }

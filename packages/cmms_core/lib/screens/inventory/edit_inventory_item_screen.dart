@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../models/inventory_item.dart';
 import '../../providers/inventory_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 class EditInventoryItemScreen extends StatefulWidget {
   const EditInventoryItemScreen({
@@ -183,13 +184,15 @@ class _EditInventoryItemScreenState extends State<EditInventoryItemScreen> {
         );
         Navigator.pop(context, true);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating inventory item: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not update inventory item. Please try again.',
+          stackTrace: st,
+          contextLabel: 'EditInventoryItem: update',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {

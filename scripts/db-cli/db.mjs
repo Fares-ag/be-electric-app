@@ -145,6 +145,17 @@ Configure: scripts/db.env (copy from db.env.example)
           process.exit(1);
         }
         const fileSql = fs.readFileSync(filePath, 'utf8');
+        const runAsSingleScript =
+          /^\s*BEGIN\s*;/im.test(fileSql) ||
+          /\bDO\s+\$\$/im.test(fileSql) ||
+          filePath.includes('migrate_');
+
+        if (runAsSingleScript) {
+          await sql.unsafe(fileSql);
+          console.log('Script completed.');
+          break;
+        }
+
         // Run multiple statements (split on ; at line end) for checklist files
         const statements = fileSql
           .split(/;\s*\n/)

@@ -1,6 +1,8 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../config/release_safety.dart';
 
 /// Comprehensive utility to remove ALL duplicate data from Supabase
 /// Keeps the newest entry for each duplicate ID
@@ -9,6 +11,10 @@ class ComprehensiveDuplicateCleanup {
 
   /// Clean up all duplicates across all collections
   Future<Map<String, dynamic>> cleanupAll() async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) {
+      throw StateError('Duplicate cleanup is disabled in release builds');
+    }
+
     debugPrint('🧹 Starting comprehensive duplicate cleanup...');
 
     final results = <String, dynamic>{
@@ -278,11 +284,11 @@ class ComprehensiveDuplicateCleanup {
         for (final id in idsToDelete) {
           try {
             await _supabase.from(tableName).delete().eq('id', id);
-          } catch (e) {
+          } catch (e, st) {
             debugPrint('Error deleting $id: $e');
           }
         }
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('   ❌ Failed to delete duplicates: $e');
       }
     }
@@ -304,7 +310,7 @@ class ComprehensiveDuplicateCleanup {
         final createdAt = data['createdAt'];
         if (createdAt is String) return DateTime.parse(createdAt);
       }
-    } catch (e) {
+    } catch (e, st) {
       // Ignore parsing errors
     }
 

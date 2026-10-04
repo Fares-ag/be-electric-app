@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../config/app_config.dart';
 import '../providers/auth_provider.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/profile/user_profile_screen.dart';
+import '../screens/requestor/pm/requestor_pm_dashboard_screen.dart';
 import '../screens/requestor/requestor_analytics_screen.dart';
+import '../screens/requestor/support/requestor_support_screen.dart';
 import '../utils/app_theme.dart';
 import 'notification_badge.dart';
 import 'notification_list_screen.dart' deferred as notif_list;
@@ -90,6 +93,33 @@ void showRequestorMoreMenu(
                 );
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.support_agent_outlined),
+              title: const Text('Be Electric Support'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const RequestorSupportScreen(),
+                  ),
+                );
+              },
+            ),
+            if (AppConfig.enablePmOccurrences)
+              ListTile(
+                leading: const Icon(Icons.event_repeat_outlined),
+                title: const Text('Preventive Maintenance'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const RequestorPmDashboardScreen(),
+                    ),
+                  );
+                },
+              ),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.logout, color: AppTheme.accentRed),

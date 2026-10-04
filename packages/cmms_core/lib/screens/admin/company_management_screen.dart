@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../models/company.dart';
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/responsive_layout.dart';
 import 'company_chargers_screen.dart';
 import 'create_company_screen.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CompanyManagementScreen extends StatefulWidget {
   const CompanyManagementScreen({super.key});
@@ -28,21 +29,23 @@ class _CompanyManagementScreenState extends State<CompanyManagementScreen> {
   Future<void> _loadCompanies() async {
     setState(() => _isLoading = true);
     try {
-      final companies = await SupabaseDatabaseService.instance.getAllCompanies();
+      final companies = await CmmsRepositories.users.getAllCompanies();
       if (mounted) {
         setState(() {
           _companies = companies;
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading companies: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load companies. Please try again.',
+          stackTrace: st,
+          contextLabel: 'CompanyManagement: load',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -82,7 +85,7 @@ class _CompanyManagementScreenState extends State<CompanyManagementScreen> {
 
     if (confirmed == true && mounted) {
       try {
-        await SupabaseDatabaseService.instance.deleteCompany(company.id);
+        await CmmsRepositories.users.deleteCompany(company.id);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -92,14 +95,16 @@ class _CompanyManagementScreenState extends State<CompanyManagementScreen> {
           );
           _loadCompanies();
         }
-      } catch (e) {
+      } catch (e, st) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error deleting company: $e'),
-              backgroundColor: AppTheme.accentRed,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not delete company. Please try again.',
+          stackTrace: st,
+          contextLabel: 'CompanyManagement: delete',
+          backgroundColor: AppTheme.accentRed,
+        );
         }
       }
     }

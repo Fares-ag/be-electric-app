@@ -55,4 +55,49 @@ void main() {
       expect(fields.priority, WorkOrderPriority.high);
     });
   });
+
+  group('buildMaintenanceRequestNotes', () {
+    test('matches requestor review-screen notes shape', () {
+      expect(
+        buildMaintenanceRequestNotes(
+          chargerType: 'Siemens',
+          chargerId: 'ast-001',
+          categoryIssue: 'Electrical',
+        ),
+        'Department: N/A\n'
+        'Charger: Siemens\n'
+        'Charger ID: AST-001\n'
+        'Category Issue: Electrical',
+      );
+    });
+  });
+
+  group('resolveRequestorCategoryIssueLabel', () {
+    test('maps stored categories back to form labels', () {
+      expect(
+        resolveRequestorCategoryIssueLabel(RepairCategory.electrical),
+        'Electrical',
+      );
+      expect(
+        resolveRequestorCategoryIssueLabel(RepairCategory.mechanicalHvac),
+        'Mechanical',
+      );
+      expect(
+        resolveRequestorCategoryIssueLabel(RepairCategory.itLowVoltage),
+        'Software',
+      );
+      expect(
+        resolveRequestorCategoryIssueLabel(RepairCategory.specializedEquipment),
+        'Hardware',
+      );
+    });
+
+    test('unknown or legacy categories fall back to Other', () {
+      expect(
+        resolveRequestorCategoryIssueLabel(RepairCategory.plumbing),
+        'Other',
+      );
+      expect(resolveRequestorCategoryIssueLabel(null), 'Other');
+    });
+  });
 }

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/design_tokens.dart';
+
 class ResponsiveLayout {
   // Breakpoints for different screen sizes
   static const double mobileBreakpoint = 600;
@@ -32,11 +34,20 @@ class ResponsiveLayout {
     final screenType = getScreenType(context);
     switch (screenType) {
       case ScreenType.mobile:
-        return const EdgeInsets.symmetric(horizontal: 16, vertical: 16);
+        return const EdgeInsets.symmetric(
+          horizontal: DesignTokens.spacingM,
+          vertical: DesignTokens.spacingM,
+        );
       case ScreenType.tablet:
-        return const EdgeInsets.symmetric(horizontal: 20, vertical: 20);
+        return const EdgeInsets.symmetric(
+          horizontal: DesignTokens.spacingL,
+          vertical: DesignTokens.spacingL,
+        );
       case ScreenType.desktop:
-        return const EdgeInsets.symmetric(horizontal: 24, vertical: 24);
+        return const EdgeInsets.symmetric(
+          horizontal: DesignTokens.spacingXL,
+          vertical: DesignTokens.spacingXL,
+        );
     }
   }
 
@@ -45,11 +56,11 @@ class ResponsiveLayout {
     final screenType = getScreenType(context);
     switch (screenType) {
       case ScreenType.mobile:
-        return const EdgeInsets.all(8);
+        return const EdgeInsets.all(DesignTokens.spacingS);
       case ScreenType.tablet:
-        return const EdgeInsets.all(16);
+        return const EdgeInsets.all(DesignTokens.spacingM);
       case ScreenType.desktop:
-        return const EdgeInsets.all(24);
+        return const EdgeInsets.all(DesignTokens.spacingXL);
     }
   }
 

@@ -8,12 +8,9 @@ import '../models/pm_task.dart';
 import '../models/work_order.dart';
 import '../services/unified_data_service.dart';
 import 'data_quality_service.dart';
+import '../config/locator.dart';
 
 class DataQualityMonitor {
-  DataQualityMonitor._();
-  static DataQualityMonitor? _instance;
-  static DataQualityMonitor get instance =>
-      _instance ??= DataQualityMonitor._();
 
   Timer? _monitoringTimer;
   final StreamController<DataQualityReport> _qualityController =
@@ -65,7 +62,7 @@ class DataQualityMonitor {
       print('ðŸ” Data Quality Monitor: Performing quality check...');
 
       // ðŸ”¥ Load real-time data from UnifiedDataService
-      final dataService = UnifiedDataService.instance;
+      final dataService = sl<UnifiedDataService>();
       final workOrders = dataService.workOrders;
       final assets = dataService.assets;
       final pmTasks = dataService.pmTasks;
@@ -88,7 +85,7 @@ class DataQualityMonitor {
       print(
         'ðŸ” Data Quality Monitor: Quality check completed - Score: ${report.accuracyScore.toStringAsFixed(1)}%',
       );
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Data Quality Monitor: Error during quality check: $e');
     }
   }
@@ -129,7 +126,7 @@ class DataQualityMonitor {
         accuracyScore: accuracyScore,
         generatedAt: DateTime.now(),
       );
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Data Quality Monitor: Error generating quality report: $e');
       return DataQualityReport(
         totalRecords: 0,
@@ -373,7 +370,7 @@ class DataQualityMonitor {
       }
 
       return trends.reversed.toList(); // Most recent first
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Data Quality Monitor: Error getting quality trends: $e');
       return [];
     }
@@ -440,7 +437,7 @@ class DataQualityMonitor {
       }
 
       return recommendations;
-    } catch (e) {
+    } catch (e, st) {
       print(
         'âŒ Data Quality Monitor: Error getting quality recommendations: $e',
       );
@@ -530,7 +527,7 @@ class DataQualityMonitor {
         'warnings': warnings,
         'validatedAt': DateTime.now().toIso8601String(),
       };
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Data Quality Monitor: Error validating record: $e');
       return {
         'valid': false,

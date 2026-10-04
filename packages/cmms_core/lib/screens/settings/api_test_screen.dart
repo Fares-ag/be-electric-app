@@ -6,6 +6,7 @@ import '../../services/asset_integration_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../services/hybrid_dam_service.dart';
 import '../../services/service_account_auth.dart';
+import '../../config/locator.dart';
 
 class ApiTestScreen extends StatefulWidget {
   const ApiTestScreen({super.key});
@@ -35,7 +36,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
   }
 
   Future<void> _checkFirebaseAuthStatus() async {
-    final isAuthenticated = SupabaseAuthService.instance.isSignedIn;
+    final isAuthenticated = sl<SupabaseAuthService>().isSignedIn;
     setState(() {
       _isFirebaseAuthenticated = isAuthenticated;
     });
@@ -179,11 +180,11 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
     try {
       // Try anonymous sign-in first (for demo purposes)
-      final credential = await SupabaseAuthService.instance.signInAnonymously();
+      final credential = await sl<SupabaseAuthService>().signInAnonymously();
 
       if (credential != null) {
         // Get the token
-        final token = await SupabaseAuthService.instance.getIdToken();
+        final token = await sl<SupabaseAuthService>().getIdToken();
 
         if (token != null) {
           _tokenController.text = token;
@@ -412,7 +413,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
     try {
       print('âš¡ Testing INSTANT asset connection...');
-      final instantService = HybridDamService();
+      final instantService = sl<HybridDamService>();
 
       // Test instant connection
       await instantService.initialize();
@@ -477,7 +478,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
     try {
       print('ðŸ” DIAGNOSTIC: Starting Firestore database analysis...');
-      final diagnosticService = HybridDamService();
+      final diagnosticService = sl<HybridDamService>();
 
       await diagnosticService.initialize();
       const results = 'Hybrid DAM Service diagnostic completed';
@@ -528,7 +529,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
     try {
       print('âš¡ OPTIMIZED: Testing optimized asset connection...');
-      final optimizedService = HybridDamService();
+      final optimizedService = sl<HybridDamService>();
 
       // Test optimized connection
       await optimizedService.initialize();
@@ -596,7 +597,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
     try {
       print('âš¡ ENHANCED DAM: Testing enhanced DAM connection...');
-      final enhancedService = HybridDamService();
+      final enhancedService = sl<HybridDamService>();
 
       // Initialize service
       await enhancedService.initialize();
@@ -670,7 +671,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
     try {
       print('âš¡ DIRECT FIRESTORE: Testing direct Firestore connection...');
-      final directService = HybridDamService();
+      final directService = sl<HybridDamService>();
 
       // Initialize service
       await directService.initialize();
@@ -839,7 +840,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
     try {
       print('ðŸš€ Hybrid DAM: Starting hybrid connection test...');
 
-      final hybridService = HybridDamService();
+      final hybridService = sl<HybridDamService>();
       await hybridService.initialize();
 
       final startTime = DateTime.now();

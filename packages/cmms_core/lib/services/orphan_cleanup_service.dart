@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 
+import '../config/release_safety.dart';
 import '../models/pm_task.dart';
 import '../models/work_order.dart';
 import '../services/supabase_database_service.dart';
 import '../services/unified_data_service.dart';
+import '../config/locator.dart';
 
 class OrphanCleanupReport {
   OrphanCleanupReport({
@@ -24,15 +26,20 @@ class OrphanCleanupReport {
 }
 
 class OrphanCleanupService {
-  OrphanCleanupService._();
-  static final OrphanCleanupService instance = OrphanCleanupService._();
 
-  final SupabaseDatabaseService _firestore = SupabaseDatabaseService.instance;
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  final SupabaseDatabaseService _firestore = sl<SupabaseDatabaseService>();
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
 
   Future<OrphanCleanupReport> run({
     bool delete = false,
   }) async {
+    if (delete && !ReleaseSafety.allowDestructiveAdminTools) {
+      throw StateError('Orphan deletion is disabled in release builds');
+    }
+    if (!delete && !ReleaseSafety.showDevTools) {
+      throw StateError('Orphan cleanup diagnostics are disabled in release builds');
+    }
+
     try {
       debugPrint(
         '🧹 OrphanCleanup: Starting run (delete=$delete) – fetching datasets...',

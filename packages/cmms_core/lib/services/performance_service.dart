@@ -6,9 +6,6 @@ import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
 class PerformanceService {
-  factory PerformanceService() => _instance;
-  PerformanceService._internal();
-  static final PerformanceService _instance = PerformanceService._internal();
 
   /// Compress image to reduce file size
   static Future<String> compressImage(
@@ -66,7 +63,7 @@ class PerformanceService {
       await compressedFile.writeAsBytes(compressedBytes);
 
       return compressedPath;
-    } catch (e) {
+    } catch (e, st) {
       throw Exception('Failed to compress image: $e');
     }
   }
@@ -301,7 +298,7 @@ class _PaginatedListWidgetState<T> extends State<_PaginatedListWidget<T>> {
         _hasMore = newItems.length == widget.pageSize;
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _hasError = true;
         _isLoading = false;

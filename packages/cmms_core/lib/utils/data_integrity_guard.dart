@@ -16,7 +16,7 @@ class DataIntegrityGuard {
           .limit(1);
 
       return (response as List).isEmpty;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ Error checking email uniqueness: $e');
       return false;
     }
@@ -32,7 +32,7 @@ class DataIntegrityGuard {
           .limit(1);
 
       return (response as List).isEmpty;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ Error checking ticket number uniqueness: $e');
       return false;
     }
@@ -96,7 +96,7 @@ class DataIntegrityGuard {
           .limit(1);
 
       return (response as List).isEmpty;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ Error checking document uniqueness: $e');
       return false;
     }
@@ -136,7 +136,7 @@ class DataIntegrityGuard {
         for (final id in idsToDelete) {
           try {
             await _supabase.from(collection).delete().eq('id', id);
-          } catch (e) {
+          } catch (e, st) {
             debugPrint('Error deleting $id: $e');
           }
         }
@@ -144,7 +144,7 @@ class DataIntegrityGuard {
       debugPrint('âœ… Removed $count "unknown" entries from $collection');
 
       return count;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ Error removing unknown entries: $e');
       return 0;
     }
@@ -188,7 +188,7 @@ class DataIntegrityGuard {
         for (final id in idsToDelete) {
           try {
             await _supabase.from(collection).delete().eq('id', id);
-          } catch (e) {
+          } catch (e, st) {
             debugPrint('Error deleting $id: $e');
           }
         }
@@ -198,7 +198,7 @@ class DataIntegrityGuard {
       debugPrint('âœ… Removed $count duplicates from $collection');
 
       return count;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ Error removing duplicates: $e');
       return 0;
     }
@@ -253,7 +253,7 @@ class DataIntegrityGuard {
       }
 
       return count;
-    } catch (e) {
+    } catch (e, st) {
       return 0;
     }
   }
@@ -277,7 +277,7 @@ class DataIntegrityGuard {
       }
 
       return duplicates;
-    } catch (e) {
+    } catch (e, st) {
       return 0;
     }
   }

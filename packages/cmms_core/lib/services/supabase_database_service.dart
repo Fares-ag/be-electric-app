@@ -8,8 +8,11 @@ import '../models/asset.dart';
 import '../models/company.dart';
 import '../models/inventory_item.dart';
 import '../models/parts_request.dart';
+import '../models/pm_occurrence.dart';
+import '../models/pm_schedule.dart';
 import '../models/pm_task.dart';
 import '../models/purchase_order.dart';
+import '../models/support_request.dart';
 import '../models/user.dart' as app_user;
 import '../models/work_order.dart';
 import '../models/workflow_models.dart';
@@ -23,17 +26,13 @@ import 'enhanced_notification_service.dart';
 import 'escalation_service.dart';
 
 class SupabaseDatabaseService {
-  SupabaseDatabaseService._();
-  static SupabaseDatabaseService? _instance;
-  static SupabaseDatabaseService get instance =>
-      _instance ??= SupabaseDatabaseService._();
 
   /// Initialize Supabase Database Service
   Future<void> initialize() async {
     try {
       debugPrint('Supabase Database: Initializing...');
       debugPrint('Supabase Database: Initialized successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase Database: Initialization error: $e');
     }
   }
@@ -50,46 +49,6 @@ class SupabaseDatabaseService {
     r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
   );
   static bool _isValidUuid(String s) => _uuidRegex.hasMatch(s);
-
-  /// [work_orders] UUID FK columns; app may use string slugs (e.g. [asset_…],
-  /// [company-…]). Move non-UUID values to [metadata] so RPC/update does not 22P02.
-  void _moveNonUuidWorkOrderFksToMetadata(Map<String, dynamic> data) {
-    _moveNonUuidColumnToMetadata(
-      data,
-      columnKey: 'assetId',
-      metadataKey: 'appAssetId',
-    );
-    _moveNonUuidColumnToMetadata(
-      data,
-      columnKey: 'companyId',
-      metadataKey: 'appCompanyId',
-    );
-  }
-
-  void _moveNonUuidColumnToMetadata(
-    Map<String, dynamic> data, {
-    required String columnKey,
-    required String metadataKey,
-  }) {
-    final raw = data[columnKey];
-    if (raw == null) return;
-    final s = raw.toString();
-    if (s.isEmpty) {
-      data.remove(columnKey);
-      return;
-    }
-    if (_isValidUuid(s)) return;
-    final existing =
-        data['metadata'] as Map<String, dynamic>? ?? <String, dynamic>{};
-    data['metadata'] = <String, dynamic>{
-      ...existing,
-      metadataKey: s,
-    };
-    data.remove(columnKey);
-    debugPrint(
-      'Supabase: work order $columnKey is non-UUID; stored in metadata.$metadataKey',
-    );
-  }
 
   /// Convert data map to Supabase format (handle DateTime conversion)
   Map<String, dynamic> convertToSupabaseMap(Map<String, dynamic> dataMap) {
@@ -119,7 +78,7 @@ class SupabaseDatabaseService {
           } else {
             supabaseMap[key] = value;
           }
-        } catch (e) {
+        } catch (e, st) {
           supabaseMap[key] = value;
         }
       } else if (value is Map) {
@@ -168,6 +127,10 @@ class SupabaseDatabaseService {
       if (metadata.containsKey('previousStatus') &&
           !data.containsKey('previousStatus')) {
         data['previousStatus'] = metadata['previousStatus'];
+      }
+      if (metadata.containsKey('workDurationSeconds') &&
+          !data.containsKey('workDurationSeconds')) {
+        data['workDurationSeconds'] = metadata['workDurationSeconds'];
       }
       // Extract problem photo URLs (requestor images) from metadata for display.
       // Use value check (not just containsKey) so a null/empty Supabase column
@@ -273,9 +236,144 @@ class SupabaseDatabaseService {
     try {
       DateTime.parse(value);
       return value.contains('T') || value.contains('-');
-    } catch (e) {
+    } catch (e, st) {
       return false;
     }
+  }
+
+  DateTime? _latestWorkOrderReferenceBeforeStart(WorkOrder workOrder) {
+    final createdAt = workOrder.createdAt;
+    final assignedAt = workOrder.assignedAt;
+
+    if (assignedAt != null && createdAt != null) {
+      return assignedAt.isAfter(createdAt) ? assignedAt : createdAt;
+    }
+    return assignedAt ?? createdAt;
+  }
+
+  /// Keeps timestamp ordering valid without collapsing work duration when clocks differ.
+  WorkOrder _adjustWorkOrderTimestamps(WorkOrder workOrder) {
+    var adjusted = workOrder;
+
+    if (workOrder.startedAt != null && workOrder.completedAt != null) {
+      final originalStarted = workOrder.startedAt!;
+      final originalCompleted = workOrder.completedAt!;
+      final elapsed = originalCompleted.difference(originalStarted);
+      final preservedDuration = workOrder.workDurationSeconds != null
+          ? Duration(seconds: workOrder.workDurationSeconds!)
+          : (elapsed.isNegative ? Duration.zero : elapsed);
+
+      var newStarted = originalStarted;
+      final latestReference = _latestWorkOrderReferenceBeforeStart(workOrder);
+      if (latestReference != null) {
+        final minimumStarted = latestReference.add(const Duration(seconds: 1));
+        if (newStarted.isBefore(minimumStarted) ||
+            newStarted.isAtSameMomentAs(latestReference)) {
+          debugPrint(
+            '⚠️ Supabase: Adjusting startedAt from ${originalStarted.toIso8601String()} '
+            'to preserve ${preservedDuration.inSeconds}s duration after '
+            '${latestReference.toIso8601String()}',
+          );
+          newStarted = minimumStarted;
+        }
+      }
+
+      final newCompleted = preservedDuration.inSeconds > 0
+          ? newStarted.add(preservedDuration)
+          : newStarted.add(const Duration(seconds: 1));
+
+      adjusted = adjusted.copyWith(
+        startedAt: newStarted,
+        completedAt: newCompleted,
+      );
+    } else {
+      if (workOrder.startedAt != null) {
+        final startedAt = workOrder.startedAt!;
+        final latestReference = _latestWorkOrderReferenceBeforeStart(workOrder);
+
+        if (latestReference != null) {
+          final adjustedStartedAt =
+              latestReference.add(const Duration(seconds: 1));
+          if (startedAt.isBefore(adjustedStartedAt) ||
+              startedAt.isAtSameMomentAs(latestReference)) {
+            debugPrint(
+                '⚠️ Supabase: Adjusting startedAt from ${startedAt.toIso8601String()} to be after ${latestReference.toIso8601String()}');
+            adjusted = adjusted.copyWith(startedAt: adjustedStartedAt);
+          }
+        }
+      }
+
+      if (adjusted.completedAt != null) {
+        final completedAt = adjusted.completedAt!;
+        final startedAt = adjusted.startedAt;
+        final assignedAt = adjusted.assignedAt;
+        final createdAt = adjusted.createdAt;
+
+        DateTime? latestReference;
+        if (startedAt != null) {
+          latestReference = startedAt;
+        } else if (assignedAt != null && createdAt != null) {
+          latestReference =
+              assignedAt.isAfter(createdAt) ? assignedAt : createdAt;
+        } else if (assignedAt != null) {
+          latestReference = assignedAt;
+        } else if (createdAt != null) {
+          latestReference = createdAt;
+        }
+
+        if (latestReference != null) {
+          final adjustedCompletedAt =
+              latestReference.add(const Duration(seconds: 1));
+          if (completedAt.isBefore(adjustedCompletedAt) ||
+              completedAt.isAtSameMomentAs(latestReference)) {
+            debugPrint(
+                '⚠️ Supabase: Adjusting completedAt from ${completedAt.toIso8601String()} to be after ${latestReference.toIso8601String()}');
+            adjusted = adjusted.copyWith(completedAt: adjustedCompletedAt);
+          }
+        }
+      }
+    }
+
+    if (adjusted.closedAt != null) {
+      final closedAt = adjusted.closedAt!;
+      final completedAt = adjusted.completedAt;
+      final startedAt = adjusted.startedAt;
+      final createdAt = adjusted.createdAt;
+
+      DateTime? latestReference;
+      if (completedAt != null) {
+        latestReference = completedAt;
+      } else if (startedAt != null) {
+        latestReference = startedAt;
+      } else if (createdAt != null) {
+        latestReference = createdAt;
+      }
+
+      if (latestReference != null) {
+        final adjustedClosedAt = latestReference.add(const Duration(seconds: 1));
+        if (closedAt.isBefore(adjustedClosedAt) ||
+            closedAt.isAtSameMomentAs(latestReference)) {
+          debugPrint(
+              '⚠️ Supabase: Adjusting closedAt from ${closedAt.toIso8601String()} to be after ${latestReference.toIso8601String()}');
+          adjusted = adjusted.copyWith(closedAt: adjustedClosedAt);
+        }
+      }
+    }
+
+    if (adjusted.assignedAt != null && adjusted.createdAt != null) {
+      final assignedAt = adjusted.assignedAt!;
+      final createdAt = adjusted.createdAt!;
+
+      if (assignedAt.isBefore(createdAt) ||
+          assignedAt.isAtSameMomentAs(createdAt)) {
+        final adjustedAssignedAt = createdAt.add(const Duration(seconds: 1));
+        debugPrint(
+            '⚠️ Supabase: Adjusting assignedAt from ${assignedAt.toIso8601String()} to be after ${createdAt.toIso8601String()}');
+        adjusted = adjusted.copyWith(assignedAt: adjustedAssignedAt);
+      }
+    }
+
+    return adjusted;
   }
 
   // ============================================================================
@@ -324,6 +422,10 @@ class SupabaseDatabaseService {
       if (data.containsKey('previousStatus')) {
         reopenMetadata['previousStatus'] = data.remove('previousStatus');
       }
+      if (data.containsKey('workDurationSeconds')) {
+        reopenMetadata['workDurationSeconds'] =
+            data.remove('workDurationSeconds');
+      }
 
       // Merge reopen metadata into existing metadata
       if (reopenMetadata.isNotEmpty) {
@@ -347,8 +449,6 @@ class SupabaseDatabaseService {
       data.remove('isRepeatFailure');
       data.remove('workCategory');
       _mergeWorkOrderPhotoMetadataIntoRow(data);
-
-      _moveNonUuidWorkOrderFksToMetadata(data);
 
       // Log what photo data we're sending so we can diagnose storage issues.
       final metaForLog = data['metadata'] as Map<String, dynamic>?;
@@ -377,17 +477,105 @@ class SupabaseDatabaseService {
           debugPrint(
             '📸 Photo metadata patched directly on row $savedId: $photosInMeta',
           );
-        } catch (e) {
+        } catch (e, st) {
           // Non-fatal: the RPC may have already saved metadata correctly.
           debugPrint('⚠️ Could not patch photo metadata (non-fatal): $e');
         }
       }
 
       return returnedId;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating work order: $e');
       throw Exception('Failed to create work order: $e');
     }
+  }
+
+  /// Column-safe UPDATE row for `work_orders` (also used by SyncQueue).
+  Map<String, dynamic> buildWorkOrderUpdatePayload(WorkOrder workOrder) {
+    final adjustedWorkOrder = _adjustWorkOrderTimestamps(workOrder);
+    validateWorkOrder(adjustedWorkOrder);
+
+    final data = convertToSupabaseMap(adjustedWorkOrder.toMap());
+
+    final reopenMetadata = <String, dynamic>{};
+    if (data.containsKey('reopenedAt')) {
+      reopenMetadata['reopenedAt'] = data.remove('reopenedAt');
+    }
+    if (data.containsKey('reopenedBy')) {
+      reopenMetadata['reopenedBy'] = data.remove('reopenedBy');
+    }
+    if (data.containsKey('reopenReason')) {
+      reopenMetadata['reopenReason'] = data.remove('reopenReason');
+    }
+    if (data.containsKey('reopenCount')) {
+      reopenMetadata['reopenCount'] = data.remove('reopenCount');
+    }
+    if (data.containsKey('previousCompletionDate')) {
+      reopenMetadata['previousCompletionDate'] =
+          data.remove('previousCompletionDate');
+    }
+    if (data.containsKey('previousStatus')) {
+      reopenMetadata['previousStatus'] = data.remove('previousStatus');
+    }
+    if (data.containsKey('workDurationSeconds')) {
+      reopenMetadata['workDurationSeconds'] =
+          data.remove('workDurationSeconds');
+    }
+
+    if (reopenMetadata.isNotEmpty) {
+      final existingMetadata =
+          data['metadata'] as Map<String, dynamic>? ?? {};
+      data['metadata'] = {
+        ...existingMetadata,
+        ...reopenMetadata,
+      };
+    }
+
+    data.remove('actualDuration');
+    data.remove('estimatedDuration');
+    data.remove('firstResponseTime');
+    data.remove('actualStartTime');
+    data.remove('actualEndTime');
+    data.remove('rootCause');
+    data.remove('failureMode');
+    data.remove('severityLevel');
+    data.remove('isRepeatFailure');
+    data.remove('workCategory');
+    data.remove('isOffline');
+    data.remove('lastSyncedAt');
+    _mergeWorkOrderPhotoMetadataIntoRow(data);
+    _stripLocalPhotoPathsFromWorkOrderRow(data);
+    return data;
+  }
+
+  /// Drop local filesystem paths from photo metadata before cloud write.
+  void _stripLocalPhotoPathsFromWorkOrderRow(Map<String, dynamic> data) {
+    bool isRemote(String p) {
+      final lower = p.toLowerCase();
+      return lower.startsWith('http://') || lower.startsWith('https://');
+    }
+
+    final meta = data['metadata'];
+    if (meta is! Map) return;
+    final m = Map<String, dynamic>.from(meta);
+
+    void filterList(String key) {
+      final list = m[key];
+      if (list is! List) return;
+      final kept = list
+          .map((e) => e.toString())
+          .where(isRemote)
+          .toList();
+      if (kept.isEmpty) {
+        m.remove(key);
+      } else {
+        m[key] = kept;
+      }
+    }
+
+    filterList('photoPaths');
+    filterList('completionPhotoPaths');
+    data['metadata'] = m;
   }
 
   /// Update work order in Supabase
@@ -397,172 +585,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Updating work order $workOrderId');
 
-      // Adjust timestamps before validation to prevent constraint violations
-      WorkOrder adjustedWorkOrder = workOrder;
-
-      // Step 1: Adjust startedAt if needed
-      if (workOrder.startedAt != null) {
-        final startedAt = workOrder.startedAt!;
-        final createdAt = workOrder.createdAt;
-        final assignedAt = workOrder.assignedAt;
-
-        // Find the latest of createdAt and assignedAt
-        DateTime? latestReference;
-        if (assignedAt != null && createdAt != null) {
-          latestReference =
-              assignedAt.isAfter(createdAt) ? assignedAt : createdAt;
-        } else if (assignedAt != null) {
-          latestReference = assignedAt;
-        } else if (createdAt != null) {
-          latestReference = createdAt;
-        }
-
-        // If startedAt is before the reference time, adjust it
-        if (latestReference != null) {
-          final adjustedStartedAt =
-              latestReference.add(const Duration(seconds: 1));
-          if (startedAt.isBefore(adjustedStartedAt) ||
-              startedAt.isAtSameMomentAs(latestReference)) {
-            debugPrint(
-                '⚠️ Supabase: Adjusting startedAt from ${startedAt.toIso8601String()} to be after ${latestReference.toIso8601String()}');
-            adjustedWorkOrder =
-                adjustedWorkOrder.copyWith(startedAt: adjustedStartedAt);
-          }
-        }
-      }
-
-      // Step 2: Adjust completedAt if needed (must be after startedAt/assignedAt/createdAt)
-      if (adjustedWorkOrder.completedAt != null) {
-        final completedAt = adjustedWorkOrder.completedAt!;
-        final startedAt = adjustedWorkOrder.startedAt;
-        final assignedAt = adjustedWorkOrder.assignedAt;
-        final createdAt = adjustedWorkOrder.createdAt;
-
-        // Find the latest reference
-        DateTime? latestReference;
-        if (startedAt != null) {
-          latestReference = startedAt;
-        } else if (assignedAt != null && createdAt != null) {
-          latestReference =
-              assignedAt.isAfter(createdAt) ? assignedAt : createdAt;
-        } else if (assignedAt != null) {
-          latestReference = assignedAt;
-        } else if (createdAt != null) {
-          latestReference = createdAt;
-        }
-
-        // If completedAt is before the reference time, adjust it
-        if (latestReference != null) {
-          final adjustedCompletedAt =
-              latestReference.add(const Duration(seconds: 1));
-          if (completedAt.isBefore(adjustedCompletedAt) ||
-              completedAt.isAtSameMomentAs(latestReference)) {
-            debugPrint(
-                '⚠️ Supabase: Adjusting completedAt from ${completedAt.toIso8601String()} to be after ${latestReference.toIso8601String()}');
-            adjustedWorkOrder =
-                adjustedWorkOrder.copyWith(completedAt: adjustedCompletedAt);
-          }
-        }
-      }
-
-      // Step 3: Adjust closedAt if needed (must be after completedAt/startedAt/createdAt)
-      if (adjustedWorkOrder.closedAt != null) {
-        final closedAt = adjustedWorkOrder.closedAt!;
-        final completedAt = adjustedWorkOrder.completedAt;
-        final startedAt = adjustedWorkOrder.startedAt;
-        final createdAt = adjustedWorkOrder.createdAt;
-
-        // Find the latest reference
-        DateTime? latestReference;
-        if (completedAt != null) {
-          latestReference = completedAt;
-        } else if (startedAt != null) {
-          latestReference = startedAt;
-        } else if (createdAt != null) {
-          latestReference = createdAt;
-        }
-
-        // If closedAt is before the reference time, adjust it
-        if (latestReference != null) {
-          final adjustedClosedAt =
-              latestReference.add(const Duration(seconds: 1));
-          if (closedAt.isBefore(adjustedClosedAt) ||
-              closedAt.isAtSameMomentAs(latestReference)) {
-            debugPrint(
-                '⚠️ Supabase: Adjusting closedAt from ${closedAt.toIso8601String()} to be after ${latestReference.toIso8601String()}');
-            adjustedWorkOrder =
-                adjustedWorkOrder.copyWith(closedAt: adjustedClosedAt);
-          }
-        }
-      }
-
-      // Step 4: Adjust assignedAt if needed (must be after createdAt)
-      if (adjustedWorkOrder.assignedAt != null &&
-          adjustedWorkOrder.createdAt != null) {
-        final assignedAt = adjustedWorkOrder.assignedAt!;
-        final createdAt = adjustedWorkOrder.createdAt!;
-
-        if (assignedAt.isBefore(createdAt) ||
-            assignedAt.isAtSameMomentAs(createdAt)) {
-          final adjustedAssignedAt = createdAt.add(const Duration(seconds: 1));
-          debugPrint(
-              '⚠️ Supabase: Adjusting assignedAt from ${assignedAt.toIso8601String()} to be after ${createdAt.toIso8601String()}');
-          adjustedWorkOrder =
-              adjustedWorkOrder.copyWith(assignedAt: adjustedAssignedAt);
-        }
-      }
-
-      // Now validate the adjusted work order
-      validateWorkOrder(adjustedWorkOrder);
-
-      final data = convertToSupabaseMap(adjustedWorkOrder.toMap());
-
-      // Extract reopen fields to store in metadata (since they may not be in schema yet)
-      final reopenMetadata = <String, dynamic>{};
-      if (data.containsKey('reopenedAt')) {
-        reopenMetadata['reopenedAt'] = data.remove('reopenedAt');
-      }
-      if (data.containsKey('reopenedBy')) {
-        reopenMetadata['reopenedBy'] = data.remove('reopenedBy');
-      }
-      if (data.containsKey('reopenReason')) {
-        reopenMetadata['reopenReason'] = data.remove('reopenReason');
-      }
-      if (data.containsKey('reopenCount')) {
-        reopenMetadata['reopenCount'] = data.remove('reopenCount');
-      }
-      if (data.containsKey('previousCompletionDate')) {
-        reopenMetadata['previousCompletionDate'] =
-            data.remove('previousCompletionDate');
-      }
-      if (data.containsKey('previousStatus')) {
-        reopenMetadata['previousStatus'] = data.remove('previousStatus');
-      }
-
-      // Merge reopen metadata into existing metadata
-      if (reopenMetadata.isNotEmpty) {
-        final existingMetadata =
-            data['metadata'] as Map<String, dynamic>? ?? {};
-        data['metadata'] = {
-          ...existingMetadata,
-          ...reopenMetadata,
-        };
-      }
-
-      // Remove fields that don't exist in Supabase schema
-      data.remove('actualDuration');
-      data.remove('estimatedDuration');
-      data.remove('firstResponseTime');
-      data.remove('actualStartTime');
-      data.remove('actualEndTime');
-      data.remove('rootCause');
-      data.remove('failureMode');
-      data.remove('severityLevel');
-      data.remove('isRepeatFailure');
-      data.remove('workCategory');
-      _mergeWorkOrderPhotoMetadataIntoRow(data);
-
-      _moveNonUuidWorkOrderFksToMetadata(data);
+      final data = buildWorkOrderUpdatePayload(workOrder);
 
       final response = await _client
           .from('work_orders')
@@ -572,7 +595,7 @@ class SupabaseDatabaseService {
       ensureRowsUpdated(response, entityLabel: 'Work order');
 
       debugPrint('Supabase: Work order updated successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating work order: $e');
       throw Exception('Failed to update work order: $e');
     }
@@ -588,7 +611,7 @@ class SupabaseDatabaseService {
       await _client.from('work_orders').delete().eq('id', workOrderId);
 
       debugPrint('Supabase: Work order deleted successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error deleting work order: $e');
       throw Exception('Failed to delete work order: $e');
     }
@@ -625,7 +648,7 @@ class SupabaseDatabaseService {
       }
 
       return null;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting work order: $e');
       return null;
     }
@@ -672,48 +695,9 @@ class SupabaseDatabaseService {
       debugPrint('Supabase: Retrieved ${workOrders.length} work orders '
           '(page $page, pageSize $pageSize)');
       return workOrders;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting work orders page $page: $e');
       return [];
-    }
-  }
-
-  /// All work orders for a requestor (not limited to the global page cache).
-  Future<List<WorkOrder>> getWorkOrdersByRequestor(String requestorId) async {
-    try {
-      if (!_isAuthenticated) throw Exception('User not authenticated');
-      if (requestorId.isEmpty) return [];
-
-      debugPrint('Supabase: Getting work orders for requestor $requestorId');
-
-      final response = await _client
-          .from('work_orders')
-          .select()
-          .eq('requestorId', requestorId)
-          .order('createdAt', ascending: false);
-
-      final workOrders = (response as List).map((doc) {
-        final data = convertFromSupabaseMap(Map<String, dynamic>.from(doc));
-        final normalizedId =
-            DeterministicIdGenerator.normalizeWorkOrderId(doc['id'] ?? '');
-        data['id'] = normalizedId;
-        final workOrder = WorkOrder.fromMap(data);
-        if (normalizedId != doc['id']) {
-          return workOrder.copyWith(
-            id: normalizedId,
-            ticketNumber: normalizedId,
-          );
-        }
-        return workOrder;
-      }).toList();
-
-      debugPrint(
-        'Supabase: Retrieved ${workOrders.length} work orders for requestor',
-      );
-      return workOrders;
-    } on Exception catch (e) {
-      debugPrint('Supabase: Error getting requestor work orders: $e');
-      rethrow;
     }
   }
 
@@ -748,8 +732,45 @@ class SupabaseDatabaseService {
       debugPrint(
           'Supabase: Retrieved ${workOrders.length} work orders for technician');
       return workOrders;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting work orders by technician: $e');
+      return [];
+    }
+  }
+
+  /// Get work orders by requestor
+  Future<List<WorkOrder>> getWorkOrdersByRequestor(String requestorId) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      debugPrint('Supabase: Getting work orders for requestor $requestorId');
+
+      final response = await _client
+          .from('work_orders')
+          .select()
+          .eq('requestorId', requestorId)
+          .order('createdAt', ascending: false);
+
+      final workOrders = (response as List).map((doc) {
+        final data = convertFromSupabaseMap(Map<String, dynamic>.from(doc));
+        final normalizedId =
+            DeterministicIdGenerator.normalizeWorkOrderId(doc['id'] ?? '');
+        data['id'] = normalizedId;
+        final workOrder = WorkOrder.fromMap(data);
+        if (normalizedId != doc['id']) {
+          return workOrder.copyWith(
+            id: normalizedId,
+            ticketNumber: normalizedId,
+          );
+        }
+        return workOrder;
+      }).toList();
+
+      debugPrint(
+          'Supabase: Retrieved ${workOrders.length} work orders for requestor');
+      return workOrders;
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: Error getting work orders by requestor: $e');
       return [];
     }
   }
@@ -785,7 +806,7 @@ class SupabaseDatabaseService {
       debugPrint(
           'Supabase: Retrieved ${workOrders.length} work orders for asset');
       return workOrders;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting work orders by asset: $e');
       return [];
     }
@@ -883,7 +904,7 @@ class SupabaseDatabaseService {
       await _client.from('assets').upsert(data);
 
       return id;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating asset: $e');
       throw Exception('Failed to create asset: $e');
     }
@@ -903,7 +924,7 @@ class SupabaseDatabaseService {
       await _client.from('assets').update(data).eq('id', assetId);
 
       debugPrint('Supabase: Asset updated successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating asset: $e');
       throw Exception('Failed to update asset: $e');
     }
@@ -919,7 +940,7 @@ class SupabaseDatabaseService {
       await _client.from('assets').delete().eq('id', assetId);
 
       debugPrint('Supabase: Asset deleted successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error deleting asset: $e');
       throw Exception('Failed to delete asset: $e');
     }
@@ -943,7 +964,7 @@ class SupabaseDatabaseService {
       }
 
       return null;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting asset: $e');
       return null;
     }
@@ -967,7 +988,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Retrieved ${assets.length} assets');
       return assets;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting assets: $e');
       return [];
     }
@@ -1006,7 +1027,7 @@ class SupabaseDatabaseService {
           'Supabase: getAssetsByCompanyId($column) -> ${assets.length} assets',
         );
         return assets;
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         debugPrint('Supabase: getAssetsByCompanyId $column: $e');
       }
     }
@@ -1043,7 +1064,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: No asset found with QR code: $qrCode');
       return null;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting asset by QR code: $e');
       return null;
     }
@@ -1156,7 +1177,7 @@ class SupabaseDatabaseService {
       await _client.from('pm_tasks').upsert(data);
 
       return id;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating PM task: $e');
       throw Exception('Failed to create PM task: $e');
     }
@@ -1176,7 +1197,7 @@ class SupabaseDatabaseService {
       await _client.from('pm_tasks').update(data).eq('id', pmTaskId);
 
       debugPrint('Supabase: PM task updated successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating PM task: $e');
       throw Exception('Failed to update PM task: $e');
     }
@@ -1192,10 +1213,45 @@ class SupabaseDatabaseService {
       await _client.from('pm_tasks').delete().eq('id', pmTaskId);
 
       debugPrint('Supabase: PM task deleted successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error deleting PM task: $e');
       throw Exception('Failed to delete PM task: $e');
     }
+  }
+
+  /// Get single PM task by id (for offline queue photo guards).
+  Future<PMTask?> getPMTaskById(String pmTaskId) async {
+    try {
+      if (pmTaskId.isEmpty) return null;
+
+      final response = await _client
+          .from('pm_tasks')
+          .select()
+          .eq('id', pmTaskId)
+          .maybeSingle();
+
+      if (response == null) return null;
+
+      final data = convertFromSupabaseMap(Map<String, dynamic>.from(response));
+      data['id'] = response['id'];
+      return PMTask.fromMap(data);
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: Error getting PM task by id: $e');
+      return null;
+    }
+  }
+
+  /// Build PM task update payload (mirrors [buildWorkOrderUpdatePayload]).
+  Map<String, dynamic> buildPMTaskUpdatePayload(PMTask pmTask) =>
+      _convertPMTaskToSupabaseMap(pmTask);
+
+  /// Build PM task create payload.
+  Map<String, dynamic> buildPMTaskCreatePayload(PMTask pmTask) {
+    final data = _convertPMTaskToSupabaseMap(pmTask);
+    if (pmTask.id.isNotEmpty) {
+      data['id'] = pmTask.id;
+    }
+    return data;
   }
 
   /// Get all PM tasks
@@ -1218,7 +1274,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Retrieved ${pmTasks.length} PM tasks');
       return pmTasks;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting PM tasks: $e');
       return [];
     }
@@ -1253,7 +1309,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: User created/upserted: $resultId');
       return resultId;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating user: $e');
       throw Exception('Failed to create user: $e');
     }
@@ -1274,7 +1330,7 @@ class SupabaseDatabaseService {
       await _client.rpc('update_user', params: {'p_id': userId, 'p_row': data});
 
       debugPrint('Supabase: User updated: $userId');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating user: $e');
       throw Exception('Failed to update user: $e');
     }
@@ -1290,7 +1346,7 @@ class SupabaseDatabaseService {
       await _client.rpc('delete_user_by_id', params: {'p_id': userId});
 
       debugPrint('Supabase: User deleted successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error deleting user: $e');
       throw Exception('Failed to delete user: $e');
     }
@@ -1325,7 +1381,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: User not found with email: $email');
       return null;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting user by email: $e');
       return null;
     }
@@ -1349,7 +1405,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Retrieved ${users.length} users');
       return users;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting users: $e');
       return [];
     }
@@ -1376,7 +1432,7 @@ class SupabaseDatabaseService {
       }
 
       return null;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting user $userId: $e');
       return null;
     }
@@ -1405,7 +1461,7 @@ class SupabaseDatabaseService {
       await _client.from('inventory_items').upsert(data);
 
       return id;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating inventory item: $e');
       throw Exception('Failed to create inventory item: $e');
     }
@@ -1431,7 +1487,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Retrieved ${items.length} inventory items');
       return items;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting inventory items: $e');
       return [];
     }
@@ -1445,7 +1501,7 @@ class SupabaseDatabaseService {
       final data = convertToSupabaseMap(item.toMap());
 
       await _client.from('inventory_items').update(data).eq('id', itemId);
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating inventory item: $e');
       throw Exception('Failed to update inventory item: $e');
     }
@@ -1469,7 +1525,7 @@ class SupabaseDatabaseService {
         return InventoryItem.fromMap(data);
       }
       return null;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting inventory item: $e');
       return null;
     }
@@ -1489,7 +1545,7 @@ class SupabaseDatabaseService {
       await _client.from('inventory_items').delete().eq('id', itemId);
 
       debugPrint('Supabase: Successfully deleted inventory item $itemId');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error deleting inventory item $itemId: $e');
       throw Exception('Failed to delete inventory item: $e');
     }
@@ -1527,7 +1583,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Parts request created with ID: $id');
       return id;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating parts request: $e');
       throw Exception('Failed to create parts request: $e');
     }
@@ -1553,8 +1609,9 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Retrieved ${requests.length} parts requests');
       return requests;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting parts requests: $e');
+      // Do not return [] — callers must distinguish empty vs failure.
       throw Exception('Failed to get parts requests: $e');
     }
   }
@@ -1585,9 +1642,69 @@ class SupabaseDatabaseService {
           'Failed to update parts request: no row updated (check RLS/id)',
         );
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating parts request: $e');
       throw Exception('Failed to update parts request: $e');
+    }
+  }
+
+  // ============================================================================
+  // SUPPORT REQUESTS
+  // ============================================================================
+
+  /// Create a Be Electric support request in Supabase.
+  ///
+  /// Expected table: `support_requests` (see docs/SUPPORT_REQUESTS_BACKEND.md).
+  Future<String> createSupportRequest(SupportRequest request) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      debugPrint('Supabase: Creating support request ${request.id}');
+
+      final data = convertToSupabaseMap(request.toMap());
+      if (request.id.isNotEmpty) {
+        data['id'] = request.id;
+      }
+
+      final response =
+          await _client.from('support_requests').insert(data).select();
+
+      final id = response != null && response.isNotEmpty
+          ? response[0]['id'] as String
+          : request.id;
+
+      debugPrint('Supabase: Support request created with ID: $id');
+      return id;
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: Error creating support request: $e');
+      throw Exception('Failed to create support request: $e');
+    }
+  }
+
+  /// List support requests for the signed-in requestor (RLS also applies).
+  Future<List<SupportRequest>> getSupportRequestsForUser(String userId) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      debugPrint('Supabase: Getting support requests for user $userId');
+
+      final response = await _client
+          .from('support_requests')
+          .select()
+          .eq('createdBy', userId)
+          .order('createdAt', ascending: false);
+
+      final requests = (response as List).map((doc) {
+        final data = convertFromSupabaseMap(Map<String, dynamic>.from(doc));
+        data['id'] = doc['id'];
+        return SupportRequest.fromMap(data);
+      }).toList();
+
+      debugPrint('Supabase: Retrieved ${requests.length} support requests');
+      return requests;
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: Error getting support requests: $e');
+      throw Exception('Failed to load support requests: $e');
     }
   }
 
@@ -1616,7 +1733,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Purchase order created with ID: $id');
       return id;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating purchase order: $e');
       throw Exception('Failed to create purchase order: $e');
     }
@@ -1642,7 +1759,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Retrieved ${orders.length} purchase orders');
       return orders;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting purchase orders: $e');
       return [];
     }
@@ -1656,7 +1773,7 @@ class SupabaseDatabaseService {
       final data = convertToSupabaseMap(order.toMap());
 
       await _client.from('purchase_orders').update(data).eq('id', orderId);
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating purchase order: $e');
       throw Exception('Failed to update purchase order: $e');
     }
@@ -1774,7 +1891,7 @@ class SupabaseDatabaseService {
         }
         return workOrder;
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: queryWorkOrders error: $e');
       return [];
     }
@@ -1823,7 +1940,7 @@ class SupabaseDatabaseService {
         data['id'] = d['id'];
         return PMTask.fromMap(data);
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: queryPMTasks error: $e');
       return [];
     }
@@ -1838,7 +1955,7 @@ class SupabaseDatabaseService {
     try {
       await _client.rpc('get_users_list');
       return true;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Connection check failed: $e');
       return false;
     }
@@ -1887,7 +2004,7 @@ class SupabaseDatabaseService {
         data['id'] = doc['id'];
         return Asset.fromMap(data);
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error searching assets: $e');
       return [];
     }
@@ -1915,7 +2032,7 @@ class SupabaseDatabaseService {
       }
 
       debugPrint('Supabase: All data cleared');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error clearing data: $e');
       throw Exception('Failed to clear data: $e');
     }
@@ -1931,7 +2048,7 @@ class SupabaseDatabaseService {
       final data = convertToSupabaseMap(event.toMap());
       await _client.from('audit_events').insert(data);
       debugPrint('Supabase: Audit event saved: ${event.id}');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error saving audit event: $e');
       throw Exception('Failed to save audit event: $e');
     }
@@ -1954,7 +2071,7 @@ class SupabaseDatabaseService {
         final data = convertFromSupabaseMap(Map<String, dynamic>.from(doc));
         return AuditEvent.fromMap(data);
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting audit events: $e');
       throw Exception('Failed to get audit events: $e');
     }
@@ -1973,7 +2090,7 @@ class SupabaseDatabaseService {
         final data = convertFromSupabaseMap(Map<String, dynamic>.from(doc));
         return AuditEvent.fromMap(data);
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting audit events by user: $e');
       throw Exception('Failed to get audit events by user: $e');
     }
@@ -1992,7 +2109,7 @@ class SupabaseDatabaseService {
         final data = convertFromSupabaseMap(Map<String, dynamic>.from(doc));
         return AuditEvent.fromMap(data);
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting audit events by type: $e');
       throw Exception('Failed to get audit events by type: $e');
     }
@@ -2020,7 +2137,7 @@ class SupabaseDatabaseService {
       };
       await _client.from('escalation_events').insert(data);
       debugPrint('Supabase: Escalation event saved: ${event.id}');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error saving escalation event: $e');
       throw Exception('Failed to save escalation event: $e');
     }
@@ -2063,7 +2180,7 @@ class SupabaseDatabaseService {
           data: Map<String, dynamic>.from(data['data'] ?? {}),
         );
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting escalation events: $e');
       throw Exception('Failed to get escalation events: $e');
     }
@@ -2095,7 +2212,7 @@ class SupabaseDatabaseService {
       };
       await _client.from('notifications').insert(data);
       debugPrint('Supabase: Notification saved: ${notification.id}');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error saving notification: $e');
       throw Exception('Failed to save notification: $e');
     }
@@ -2152,7 +2269,7 @@ class SupabaseDatabaseService {
               data['actions'] != null ? List<String>.from(data['actions']) : [],
         );
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting notifications: $e');
       throw Exception('Failed to get notifications: $e');
     }
@@ -2173,7 +2290,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Workflow created with ID: ${workflow.id}');
       return workflow.id;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating workflow: $e');
       throw Exception('Failed to create workflow: $e');
     }
@@ -2192,7 +2309,7 @@ class SupabaseDatabaseService {
           .eq('id', workflowId);
 
       debugPrint('Supabase: Workflow updated successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating workflow: $e');
       throw Exception('Failed to update workflow: $e');
     }
@@ -2208,7 +2325,7 @@ class SupabaseDatabaseService {
       await _client.from('workflows').delete().eq('id', workflowId);
 
       debugPrint('Supabase: Workflow deleted successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error deleting workflow: $e');
       throw Exception('Failed to delete workflow: $e');
     }
@@ -2230,7 +2347,7 @@ class SupabaseDatabaseService {
       }
 
       return null;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting workflow: $e');
       return null;
     }
@@ -2247,7 +2364,7 @@ class SupabaseDatabaseService {
           .order('createdAt', ascending: false);
 
       return (response as List).map((doc) => Workflow.fromJson(doc)).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting workflows: $e');
       return [];
     }
@@ -2265,7 +2382,7 @@ class SupabaseDatabaseService {
           .order('createdAt', ascending: false);
 
       return (response as List).map((doc) => Workflow.fromJson(doc)).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting workflows by status: $e');
       return [];
     }
@@ -2310,7 +2427,7 @@ class SupabaseDatabaseService {
       }
 
       return workflows;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting workflows for user: $e');
       return [];
     }
@@ -2328,7 +2445,7 @@ class SupabaseDatabaseService {
           .contains('approvers', [userId]).order('createdAt', ascending: false);
 
       return (response as List).map((doc) => Workflow.fromJson(doc)).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting pending approvals: $e');
       return [];
     }
@@ -2354,7 +2471,7 @@ class SupabaseDatabaseService {
       };
       await _client.from('vendors').upsert(data);
       debugPrint('Supabase: Vendor saved: ${vendor.id}');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error saving vendor: $e');
       throw Exception('Failed to save vendor: $e');
     }
@@ -2379,7 +2496,7 @@ class SupabaseDatabaseService {
           notes: data['notes'],
         );
       }).toList();
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting vendors: $e');
       throw Exception('Failed to get vendors: $e');
     }
@@ -2409,7 +2526,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Retrieved ${companies.length} companies');
       return companies;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting companies: $e');
       return [];
     }
@@ -2457,7 +2574,7 @@ class SupabaseDatabaseService {
 
       debugPrint('Supabase: Company created/upserted: $readableId');
       return readableId;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error creating company: $e');
       throw Exception('Failed to create company: $e');
     }
@@ -2493,7 +2610,7 @@ class SupabaseDatabaseService {
       await _client.from('companies').update(data).eq('id', companyId);
 
       debugPrint('Supabase: Company updated: $companyId');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error updating company: $e');
       throw Exception('Failed to update company: $e');
     }
@@ -2526,7 +2643,7 @@ class SupabaseDatabaseService {
       await _client.from('companies').delete().eq('id', companyId);
 
       debugPrint('Supabase: Company deleted: $companyId');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error deleting company: $e');
       throw Exception('Failed to delete company: $e');
     }
@@ -2551,9 +2668,217 @@ class SupabaseDatabaseService {
       }
 
       return null;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase: Error getting company $companyId: $e');
       return null;
+    }
+  }
+
+  // ============================================================================
+  // PM SCHEDULES + OCCURRENCES (Option A)
+  // ============================================================================
+
+  static const String _pmOccurrenceListSelect = '''
+id, scheduleId, assetId, dueDate, status, assignedTechnicianIds,
+completedAt, completedById, completionPhotoPath, completionNotes,
+cancelledAt, cancelledById, cancelReason,
+requestorConfirmedAt, requestorConfirmedById,
+metadata, createdAt, updatedAt,
+schedule:pm_schedules(
+  id, taskName, description, frequency, frequencyValue, scheduleStartDate,
+  scheduleEndDate, companyId, assignedTechnicianIds, createdById, metadata,
+  createdAt, updatedAt
+),
+asset:assets(id, name, location, manufacturer, model, serialNumber)
+''';
+
+  static const String _pmScheduleSelect = '''
+id, taskName, description, frequency, frequencyValue, scheduleStartDate,
+scheduleEndDate, companyId, assignedTechnicianIds, createdById, metadata,
+createdAt, updatedAt
+''';
+
+  PmOccurrence _mapPmOccurrenceRow(Map<String, dynamic> doc) {
+    final data = convertFromSupabaseMap(Map<String, dynamic>.from(doc));
+    data['id'] = doc['id'];
+    return PmOccurrence.fromMap(data);
+  }
+
+  String _formatDateOnly(DateTime value) {
+    final normalized = DateTime(value.year, value.month, value.day);
+    return normalized.toIso8601String().split('T').first;
+  }
+
+  Future<List<PmOccurrence>> getAssignedPmOccurrences(
+    String technicianId,
+  ) async {
+    return queryPmOccurrences(assignedTechnicianId: technicianId);
+  }
+
+  Future<PmOccurrence?> getPmOccurrenceById(String occurrenceId) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      final response = await _client
+          .from('pm_task_occurrences')
+          .select(_pmOccurrenceListSelect)
+          .eq('id', occurrenceId)
+          .maybeSingle();
+
+      if (response == null) return null;
+      return _mapPmOccurrenceRow(Map<String, dynamic>.from(response));
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: getPmOccurrenceById error: $e');
+      return null;
+    }
+  }
+
+  Future<List<PmOccurrence>> queryPmOccurrences({
+    String? assignedTechnicianId,
+    String? assetId,
+    String? companyId,
+    String? scheduleId,
+    String? storedStatus,
+    DateTime? dueStart,
+    DateTime? dueEnd,
+  }) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      var queryBuilder = _client
+          .from('pm_task_occurrences')
+          .select(_pmOccurrenceListSelect);
+
+      if (assignedTechnicianId != null && assignedTechnicianId.isNotEmpty) {
+        queryBuilder = queryBuilder.contains(
+          'assignedTechnicianIds',
+          [assignedTechnicianId],
+        );
+      }
+      if (assetId != null && assetId.isNotEmpty) {
+        queryBuilder = queryBuilder.eq('assetId', assetId);
+      }
+      if (scheduleId != null && scheduleId.isNotEmpty) {
+        queryBuilder = queryBuilder.eq('scheduleId', scheduleId);
+      }
+      if (storedStatus != null && storedStatus.isNotEmpty) {
+        queryBuilder = queryBuilder.eq('status', storedStatus);
+      }
+      if (dueStart != null) {
+        queryBuilder =
+            queryBuilder.gte('dueDate', _formatDateOnly(dueStart));
+      }
+      if (dueEnd != null) {
+        queryBuilder = queryBuilder.lte('dueDate', _formatDateOnly(dueEnd));
+      }
+
+      final response = await queryBuilder.order('dueDate', ascending: true);
+      var rows = (response as List)
+          .map(
+            (doc) => _mapPmOccurrenceRow(Map<String, dynamic>.from(doc as Map)),
+          )
+          .toList();
+
+      if (companyId != null && companyId.isNotEmpty) {
+        rows = rows
+            .where(
+              (occurrence) => occurrence.schedule?.companyId == companyId,
+            )
+            .toList();
+      }
+
+      return rows;
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: queryPmOccurrences error: $e');
+      return [];
+    }
+  }
+
+  Future<List<PmSchedule>> queryPmSchedules({String? companyId}) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      var queryBuilder = _client.from('pm_schedules').select(_pmScheduleSelect);
+      if (companyId != null && companyId.isNotEmpty) {
+        queryBuilder = queryBuilder.eq('companyId', companyId);
+      }
+
+      final response =
+          await queryBuilder.order('createdAt', ascending: false);
+
+      return (response as List).map((doc) {
+        final data = convertFromSupabaseMap(Map<String, dynamic>.from(doc));
+        data['id'] = doc['id'];
+        return PmSchedule.fromMap(data);
+      }).toList();
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: queryPmSchedules error: $e');
+      return [];
+    }
+  }
+
+  Future<PmSchedule?> getPmScheduleById(String scheduleId) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      final response = await _client
+          .from('pm_schedules')
+          .select(_pmScheduleSelect)
+          .eq('id', scheduleId)
+          .maybeSingle();
+
+      if (response == null) return null;
+
+      final data = convertFromSupabaseMap(Map<String, dynamic>.from(response));
+      data['id'] = scheduleId;
+      return PmSchedule.fromMap(data);
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: getPmScheduleById error: $e');
+      return null;
+    }
+  }
+
+  Future<void> completePmOccurrence({
+    required String occurrenceId,
+    required String completedById,
+    String? completionNotes,
+    String? completionPhotoPath,
+  }) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      final trimmedNotes = completionNotes?.trim();
+      await _client.from('pm_task_occurrences').update({
+        'status': 'completed',
+        'completedAt': DateTime.now().toUtc().toIso8601String(),
+        'completedById': completedById,
+        'completionNotes':
+            trimmedNotes == null || trimmedNotes.isEmpty ? null : trimmedNotes,
+        'completionPhotoPath': completionPhotoPath,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', occurrenceId);
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: completePmOccurrence error: $e');
+      throw Exception('Failed to complete PM occurrence: $e');
+    }
+  }
+
+  Future<void> confirmPmOccurrenceForRequestor({
+    required String occurrenceId,
+    required String requestorId,
+  }) async {
+    try {
+      if (!_isAuthenticated) throw Exception('User not authenticated');
+
+      final now = DateTime.now().toUtc().toIso8601String();
+      await _client.from('pm_task_occurrences').update({
+        'requestorConfirmedAt': now,
+        'requestorConfirmedById': requestorId,
+        'updatedAt': now,
+      }).eq('id', occurrenceId);
+    } on Exception catch (e, st) {
+      debugPrint('Supabase: confirmPmOccurrenceForRequestor error: $e');
+      throw Exception('Failed to confirm PM occurrence: $e');
     }
   }
 }

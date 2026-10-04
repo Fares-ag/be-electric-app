@@ -34,6 +34,9 @@ import 'reporting_screen.dart';
 import 'seed_general_assets_screen.dart';
 import 'technician_viewer_screen.dart';
 import 'user_management_screen.dart';
+import '../../config/locator.dart';
+import '../../config/release_safety.dart';
+import '../../utils/user_facing_errors.dart';
 
 class AdminMainScreen extends StatefulWidget {
   const AdminMainScreen({super.key});
@@ -91,6 +94,14 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
                 const SizedBox(width: 8),
                 PopupMenuButton<String>(
                   onSelected: (value) {
+                    if (ReleaseSafety.isDevToolMenuAction(value) &&
+                        !ReleaseSafety.showDevTools) {
+                      return;
+                    }
+                    if (ReleaseSafety.isDestructiveMenuAction(value) &&
+                        !ReleaseSafety.allowDestructiveAdminTools) {
+                      return;
+                    }
                     if (value == 'logout') {
                       Provider.of<AuthProvider>(context, listen: false)
                           .logout();
@@ -234,183 +245,187 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
                         ],
                       ),
                     ),
-                    const PopupMenuDivider(),
-                    const PopupMenuItem(
-                      value: 'seed_assets',
-                      child: Row(
-                        children: [
-                          Icon(Icons.construction, color: AppTheme.accentGreen),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Setup General Assets'),
-                        ],
+                    if (ReleaseSafety.showDevTools) ...[
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: 'seed_assets',
+                        child: Row(
+                          children: [
+                            Icon(Icons.construction, color: AppTheme.accentGreen),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Setup General Assets'),
+                          ],
+                        ),
                       ),
-                    ),
-                    const PopupMenuDivider(),
-                    const PopupMenuItem(
-                      value: 'cleanup_users',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.cleaning_services,
-                            color: AppTheme.accentOrange,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Cleanup Unknown Users'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'data_diagnostic',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.troubleshoot,
-                            color: AppTheme.accentBlue,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Data Sync Diagnostic'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'assignment_diagnostic',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.assignment_ind,
-                            color: AppTheme.accentOrange,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Assignment Diagnostic'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'user_id_diagnostic',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.fingerprint,
-                            color: Colors.purple,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('User ID Diagnostic'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'remove_sample_data',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.cleaning_services,
-                            color: Colors.orange,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Remove All Sample Data'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'performance_diagnostic',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.speed,
-                            color: Colors.deepPurple,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Performance Diagnostic'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'cleanup_duplicates',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.cleaning_services,
-                            color: AppTheme.accentOrange,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Remove Duplicates'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'orphan_cleanup_dry',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.fact_check,
-                            color: AppTheme.accentGreen,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Orphan Cleanup (Dry Run)'),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'orphan_cleanup_delete',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.cleaning_services_outlined,
-                            color: AppTheme.accentRed,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text(
-                            'Orphan Cleanup (Delete)',
-                            style: TextStyle(color: AppTheme.accentRed),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'clear_database',
-                      child: Row(
-                        children: [
-                          Icon(Icons.delete_forever, color: Colors.red),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text(
-                            'Clear Database',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'nuclear_option',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.warning_amber_rounded,
-                            color: Colors.deepOrange,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text(
-                            '☢️ Nuclear Option',
-                            style: TextStyle(
-                              color: Colors.deepOrange,
-                              fontWeight: FontWeight.bold,
+                      const PopupMenuItem(
+                        value: 'cleanup_users',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.cleaning_services,
+                              color: AppTheme.accentOrange,
                             ),
-                          ),
-                        ],
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Cleanup Unknown Users'),
+                          ],
+                        ),
                       ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'fix_admin',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.admin_panel_settings,
-                            color: AppTheme.accentBlue,
-                          ),
-                          SizedBox(width: AppTheme.spacingS),
-                          Text('Fix "Unknown User" Admin'),
-                        ],
+                      const PopupMenuItem(
+                        value: 'data_diagnostic',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.troubleshoot,
+                              color: AppTheme.accentBlue,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Data Sync Diagnostic'),
+                          ],
+                        ),
                       ),
-                    ),
+                      const PopupMenuItem(
+                        value: 'assignment_diagnostic',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.assignment_ind,
+                              color: AppTheme.accentOrange,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Assignment Diagnostic'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'user_id_diagnostic',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.fingerprint,
+                              color: Colors.purple,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('User ID Diagnostic'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'performance_diagnostic',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.speed,
+                              color: Colors.deepPurple,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Performance Diagnostic'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'orphan_cleanup_dry',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.fact_check,
+                              color: AppTheme.accentGreen,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Orphan Cleanup (Dry Run)'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'fix_admin',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.admin_panel_settings,
+                              color: AppTheme.accentBlue,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Fix "Unknown User" Admin'),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (ReleaseSafety.allowDestructiveAdminTools) ...[
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: 'remove_sample_data',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.cleaning_services,
+                              color: Colors.orange,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Remove All Sample Data'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'cleanup_duplicates',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.cleaning_services,
+                              color: AppTheme.accentOrange,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text('Remove Duplicates'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'orphan_cleanup_delete',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.cleaning_services_outlined,
+                              color: AppTheme.accentRed,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text(
+                              'Orphan Cleanup (Delete)',
+                              style: TextStyle(color: AppTheme.accentRed),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'clear_database',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_forever, color: Colors.red),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text(
+                              'Clear Database',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'nuclear_option',
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.warning_amber_rounded,
+                              color: Colors.deepOrange,
+                            ),
+                            SizedBox(width: AppTheme.spacingS),
+                            Text(
+                              '☢️ Nuclear Option',
+                              style: TextStyle(
+                                color: Colors.deepOrange,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const PopupMenuDivider(),
                     const PopupMenuItem(
                       value: 'profile',
@@ -631,6 +646,14 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
           const SizedBox(width: 8),
           PopupMenuButton<String>(
             onSelected: (value) {
+              if (ReleaseSafety.isDevToolMenuAction(value) &&
+                  !ReleaseSafety.showDevTools) {
+                return;
+              }
+              if (ReleaseSafety.isDestructiveMenuAction(value) &&
+                  !ReleaseSafety.allowDestructiveAdminTools) {
+                return;
+              }
               if (value == 'logout') {
                 Provider.of<AuthProvider>(context, listen: false).logout();
               } else if (value == 'profile') {
@@ -708,48 +731,52 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
                   ],
                 ),
               ),
-              const PopupMenuItem(
-                value: 'duplicate_monitor',
-                child: Row(
-                  children: [
-                    Icon(Icons.copy_all, color: Color(0xFF7B1FA2)),
-                    SizedBox(width: AppTheme.spacingS),
-                    Text('Duplicate Monitor'),
-                  ],
+              if (ReleaseSafety.showDevTools) ...[
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: 'duplicate_monitor',
+                  child: Row(
+                    children: [
+                      Icon(Icons.copy_all, color: Color(0xFF7B1FA2)),
+                      SizedBox(width: AppTheme.spacingS),
+                      Text('Duplicate Monitor'),
+                    ],
+                  ),
                 ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'seed_assets',
-                child: Row(
-                  children: [
-                    Icon(Icons.construction, color: AppTheme.accentGreen),
-                    SizedBox(width: AppTheme.spacingS),
-                    Text('Setup General Assets'),
-                  ],
+                const PopupMenuItem(
+                  value: 'seed_assets',
+                  child: Row(
+                    children: [
+                      Icon(Icons.construction, color: AppTheme.accentGreen),
+                      SizedBox(width: AppTheme.spacingS),
+                      Text('Setup General Assets'),
+                    ],
+                  ),
                 ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'clear_database',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_forever, color: Colors.red),
-                    SizedBox(width: AppTheme.spacingS),
-                    Text('Clear Database', style: TextStyle(color: Colors.red)),
-                  ],
+              ],
+              if (ReleaseSafety.allowDestructiveAdminTools) ...[
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: 'clear_database',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_forever, color: Colors.red),
+                      SizedBox(width: AppTheme.spacingS),
+                      Text('Clear Database', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
                 ),
-              ),
-              const PopupMenuItem(
-                value: 'remove_sample_data',
-                child: Row(
-                  children: [
-                    Icon(Icons.cleaning_services, color: Colors.orange),
-                    SizedBox(width: AppTheme.spacingS),
-                    Text('Remove Sample Data'),
-                  ],
+                const PopupMenuItem(
+                  value: 'remove_sample_data',
+                  child: Row(
+                    children: [
+                      Icon(Icons.cleaning_services, color: Colors.orange),
+                      SizedBox(width: AppTheme.spacingS),
+                      Text('Remove Sample Data'),
+                    ],
+                  ),
                 ),
-              ),
+              ],
               const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'logout',
@@ -894,6 +921,8 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
 
   /// Show duplicate cleanup confirmation dialog
   static Future<void> _showDuplicateCleanupDialog(BuildContext context) async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1029,17 +1058,19 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       // Close loading dialog
       if (context.mounted) Navigator.pop(context);
 
       // Show error
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error during cleanup: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Cleanup failed. Please try again.',
+          stackTrace: st,
+          contextLabel: 'AdminMain: orphan cleanup',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -1071,6 +1102,9 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
         ),
       );
   Future<void> _showOrphanCleanupDialog({required bool delete}) async {
+    if (delete && !ReleaseSafety.allowDestructiveAdminTools) return;
+    if (!delete && !ReleaseSafety.showDevTools) return;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1109,7 +1143,7 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
     );
 
     try {
-      final report = await OrphanCleanupService.instance.run(delete: delete);
+      final report = await sl<OrphanCleanupService>().run(delete: delete);
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop(); // close progress dialog
       await showDialog<void>(
@@ -1128,14 +1162,21 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
           ],
         ),
       );
-    } catch (e) {
+    } catch (e, st) {
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop(); // close progress
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Cleanup Failed'),
-          content: Text('Error: $e'),
+          content: Text(
+            userFacingErrorMessage(
+              e,
+              genericMessage: 'Cleanup failed. Please try again.',
+              stackTrace: st,
+              contextLabel: 'AdminMain: orphan cleanup',
+            ),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),

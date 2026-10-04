@@ -1,6 +1,8 @@
 // Notification Widget - Displays notifications and alerts
 
 import 'package:flutter/material.dart';
+
+import '../config/locator.dart';
 import '../services/notification_service.dart' as notification_service;
 import '../utils/app_theme.dart';
 import 'notification_list_screen.dart';
@@ -25,7 +27,7 @@ class NotificationWidget extends StatefulWidget {
 
 class _NotificationWidgetState extends State<NotificationWidget> {
   final notification_service.NotificationService _notificationService =
-      notification_service.NotificationService();
+      sl<notification_service.NotificationService>();
 
   @override
   Widget build(BuildContext context) =>

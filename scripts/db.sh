@@ -10,6 +10,18 @@
 #   ./scripts/db.sh shell
 #   ./scripts/db.sh query "SELECT count(*) FROM work_orders"
 #   ./scripts/db.sh run scripts/sql/list_work_orders.sql
+#   ./scripts/db.sh migrate-support
+#   ./scripts/db.sh verify-support
+#   ./scripts/db.sh migrate-pm-tasks-technician-update
+#   ./scripts/db.sh verify-pm-tasks-technician-update
+#   ./scripts/db.sh migrate-inventory-technician-select
+#   ./scripts/db.sh verify-inventory-technician-select
+#   ./scripts/db.sh migrate-technician-insert-field-chargers
+#   ./scripts/db.sh verify-technician-insert-field-chargers
+#   ./scripts/db.sh report-orphan-assignments
+#   ./scripts/db.sh migrate-prevent-orphan-assignments
+#   ./scripts/db.sh verify-orphan-assignments
+#   ./scripts/db.sh support-requests
 #   ./scripts/db.sh tables
 #   ./scripts/db.sh users
 #   ./scripts/db.sh work-orders
@@ -280,6 +292,57 @@ case "$cmd" in
       FROM companies
       ORDER BY name
       LIMIT 50;"
+    fi
+    ;;
+  migrate-support|support-migrate)
+    run_psql_file "$REPO_ROOT/scripts/sql/migrate_support_requests.sql"
+    ;;
+  verify-support|support-verify)
+    run_psql_file "$REPO_ROOT/scripts/sql/verify_support_requests.sql"
+    ;;
+  migrate-pm-tasks-technician-update|pm-tasks-technician-update-migrate)
+    run_psql_file "$REPO_ROOT/scripts/sql/migrate_pm_tasks_technician_update_rls.sql"
+    ;;
+  verify-pm-tasks-technician-update|pm-tasks-technician-update-verify)
+    run_psql_file "$REPO_ROOT/scripts/sql/verify_pm_tasks_technician_update_rls.sql"
+    ;;
+  migrate-inventory-technician-select|inventory-technician-select-migrate)
+    run_psql_file "$REPO_ROOT/scripts/sql/migrate_inventory_technician_select_rls.sql"
+    ;;
+  verify-inventory-technician-select|inventory-technician-select-verify)
+    run_psql_file "$REPO_ROOT/scripts/sql/verify_inventory_technician_select_rls.sql"
+    ;;
+  migrate-technician-insert-field-chargers|technician-insert-field-chargers-migrate)
+    run_psql_file "$REPO_ROOT/scripts/sql/migrate_technician_insert_field_chargers.sql"
+    ;;
+  verify-technician-insert-field-chargers|technician-insert-field-chargers-verify)
+    run_psql_file "$REPO_ROOT/scripts/sql/verify_technician_insert_field_chargers.sql"
+    ;;
+  report-orphan-assignments|orphan-assignments-report)
+    run_psql_file "$REPO_ROOT/scripts/sql/report_orphan_technician_assignments.sql"
+    ;;
+  migrate-prevent-orphan-assignments|orphan-assignments-migrate)
+    run_psql_file "$REPO_ROOT/scripts/sql/migrate_prevent_orphan_technician_assignments.sql"
+    ;;
+  verify-orphan-assignments|orphan-assignments-verify)
+    run_psql_file "$REPO_ROOT/scripts/sql/verify_orphan_technician_assignments.sql"
+    ;;
+  verify-requestor-ppm|requestor-ppm-verify)
+    run_psql_file "$REPO_ROOT/scripts/sql/verify_requestor_ppm_backend.sql"
+    ;;
+  support-requests|support)
+    if [[ -n "$NODE_CLI" && -z "$PSQL_BIN" ]]; then
+      run_node_cli query "
+      SELECT id, type, status, \"createdBy\", \"createdAt\"
+      FROM support_requests
+      ORDER BY \"createdAt\" DESC
+      LIMIT 25;"
+    else
+      run_psql -v ON_ERROR_STOP=1 -c "
+      SELECT id, type, status, \"createdBy\", \"createdAt\"
+      FROM support_requests
+      ORDER BY \"createdAt\" DESC
+      LIMIT 25;"
     fi
     ;;
   supabase-shell)

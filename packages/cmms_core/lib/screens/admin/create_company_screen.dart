@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../models/company.dart';
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CreateCompanyScreen extends StatefulWidget {
   const CreateCompanyScreen({this.company, super.key});
@@ -68,7 +69,7 @@ class _CreateCompanyScreenState extends State<CreateCompanyScreen> {
 
       if (widget.company == null) {
         // Create new company
-        await SupabaseDatabaseService.instance.createCompany(company);
+        await CmmsRepositories.users.createCompany(company);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -80,7 +81,7 @@ class _CreateCompanyScreenState extends State<CreateCompanyScreen> {
         }
       } else {
         // Update existing company
-        await SupabaseDatabaseService.instance.updateCompany(widget.company!.id, company);
+        await CmmsRepositories.users.updateCompany(widget.company!.id, company);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -91,13 +92,15 @@ class _CreateCompanyScreenState extends State<CreateCompanyScreen> {
           Navigator.pop(context, true);
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving company: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not save company. Please try again.',
+          stackTrace: st,
+          contextLabel: 'CreateCompany: save',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {

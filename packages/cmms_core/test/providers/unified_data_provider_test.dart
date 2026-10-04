@@ -2,13 +2,30 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:cmms_core/models/pm_task.dart';
 import 'package:cmms_core/models/user.dart';
+import 'package:cmms_core/providers/cmms_provider_bundle.dart';
 import 'package:cmms_core/providers/unified_data_provider.dart';
+
+import '../test_helpers.dart';
 
 void main() {
   late UnifiedDataProvider provider;
+  late CmmsProviderBundle bundle;
+
+  setUpAll(() async {
+    await ensureServiceLocatorForTests();
+  });
+
+  tearDownAll(() async {
+    await tearDownServiceLocatorForTests();
+  });
 
   setUp(() {
-    provider = UnifiedDataProvider();
+    bundle = CmmsProviderBundle.forTesting(autoStart: false);
+    provider = bundle.unified;
+  });
+
+  tearDown(() {
+    bundle.dispose();
   });
 
   group('UnifiedDataProvider - User Filtering', () {
@@ -175,7 +192,7 @@ void main() {
     test('updateUser accepts User with updated role (persists via service)', () async {
       // Provider delegates to UnifiedDataService.updateUser -> Supabase.
       // In test env Supabase is not initialized so updateUser throws; we assert it's called.
-      final provider = UnifiedDataProvider();
+      final provider = bundle.unified;
       final userWithNewRole = User(
         id: 'test-id',
         email: 'test@example.com',

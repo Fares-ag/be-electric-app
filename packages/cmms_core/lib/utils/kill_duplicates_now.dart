@@ -2,12 +2,18 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/release_safety.dart';
+
 /// Emergency duplicate killer - removes all duplicates and blocks sample data
 class KillDuplicatesNow {
   static final SupabaseClient _supabase = Supabase.instance.client;
 
   /// Nuclear option: Delete ALL data and block sample data forever
   static Future<Map<String, dynamic>> killEverythingAndBlock() async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) {
+      throw StateError('Nuclear option is disabled in release builds');
+    }
+
     try {
       debugPrint(
         '☢️ NUCLEAR OPTION: Killing all data and blocking sample data...',
@@ -101,8 +107,10 @@ class KillDuplicatesNow {
   }
 
   /// Show nuclear option dialog
-  static Future<void> showNuclearOptionDialog(BuildContext context) async =>
-      showDialog(
+  static Future<void> showNuclearOptionDialog(BuildContext context) async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) return;
+
+    return showDialog(
         context: context,
         barrierDismissible: false,
         builder: (BuildContext dialogContext) => AlertDialog(
@@ -223,6 +231,7 @@ class KillDuplicatesNow {
           ],
         ),
       );
+  }
 
   static Widget _buildNukeItem(String text) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),

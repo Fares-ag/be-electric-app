@@ -12,6 +12,7 @@ import 'package:cmms_core/models/analytics_models.dart';
 import 'package:cmms_core/services/logger_service.dart';
 import 'package:cmms_core/services/unified_data_service.dart';
 import 'analytics_calculator.dart';
+import '../../config/locator.dart';
 
 /// Real-time analytics monitoring service
 class AnalyticsMonitor {
@@ -104,7 +105,7 @@ class AnalyticsMonitor {
   /// Update analytics data and broadcast to streams
   Future<void> _updateAnalytics() async {
     try {
-      final dataService = UnifiedDataService.instance;
+      final dataService = sl<UnifiedDataService>();
 
       // Calculate latest KPIs
       final kpis = await _calculator.calculateKPIs(

@@ -2,9 +2,6 @@
 
 /// Service for managing user authentication accounts
 class UserAuthService {
-  factory UserAuthService() => _instance;
-  UserAuthService._internal();
-  static final UserAuthService _instance = UserAuthService._internal();
 
   final SupabaseClient _client = Supabase.instance.client;
 
@@ -44,7 +41,7 @@ class UserAuthService {
         'role': role,
         'isEmailVerified': user.emailConfirmedAt != null,
       };
-    } on AuthException catch (e) {
+    } on AuthException catch (e, st) {
       String errorMessage;
       switch (e.code) {
         case 'weak-password':
@@ -60,7 +57,7 @@ class UserAuthService {
           errorMessage = 'Authentication error: ${e.message}';
       }
       throw Exception(errorMessage);
-    } catch (e) {
+    } catch (e, st) {
       throw Exception('Failed to create user account: $e');
     }
   }
@@ -69,7 +66,7 @@ class UserAuthService {
   Future<void> sendPasswordResetEmail(String email) async {
     try {
       await _client.auth.resetPasswordForEmail(email);
-    } on AuthException catch (e) {
+    } on AuthException catch (e, st) {
       String errorMessage;
       switch (e.code) {
         case 'user-not-found':
@@ -82,7 +79,7 @@ class UserAuthService {
           errorMessage = 'Password reset error: ${e.message}';
       }
       throw Exception(errorMessage);
-    } catch (e) {
+    } catch (e, st) {
       throw Exception('Failed to send password reset email: $e');
     }
   }
@@ -94,7 +91,7 @@ class UserAuthService {
       // For admin password reset, you might want to use a different approach
       throw Exception(
           'Password updates should be done by the user through password reset',);
-    } catch (e) {
+    } catch (e, st) {
       throw Exception('Failed to update password: $e');
     }
   }
@@ -105,7 +102,7 @@ class UserAuthService {
       // This would typically disable the user's authentication account
       // For now, we'll just throw an exception as this requires admin privileges
       throw Exception('User deactivation requires admin privileges');
-    } catch (e) {
+    } catch (e, st) {
       throw Exception('Failed to deactivate user account: $e');
     }
   }
@@ -116,7 +113,7 @@ class UserAuthService {
       // This would typically re-enable the user's authentication account
       // For now, we'll just throw an exception as this requires admin privileges
       throw Exception('User reactivation requires admin privileges');
-    } catch (e) {
+    } catch (e, st) {
       throw Exception('Failed to reactivate user account: $e');
     }
   }
@@ -131,7 +128,7 @@ class UserAuthService {
         'isActive': true,
         'isEmailVerified': false,
       };
-    } catch (e) {
+    } catch (e, st) {
       throw Exception('Failed to get user auth status: $e');
     }
   }

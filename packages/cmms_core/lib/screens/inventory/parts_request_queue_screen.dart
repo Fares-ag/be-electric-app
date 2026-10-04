@@ -7,6 +7,8 @@ import '../../models/parts_request.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/parts_request_service.dart';
 import '../../utils/app_theme.dart';
+import '../../config/locator.dart';
+import '../../utils/user_facing_errors.dart';
 
 class PartsRequestQueueScreen extends StatefulWidget {
   const PartsRequestQueueScreen({super.key});
@@ -17,7 +19,7 @@ class PartsRequestQueueScreen extends StatefulWidget {
 }
 
 class _PartsRequestQueueScreenState extends State<PartsRequestQueueScreen> {
-  final PartsRequestService _service = PartsRequestService();
+  final PartsRequestService _service = sl<PartsRequestService>();
   StreamSubscription<List<PartsRequest>>? _realtimeSub;
   bool _loading = false;
   List<PartsRequest> _requests = [];
@@ -48,13 +50,27 @@ class _PartsRequestQueueScreenState extends State<PartsRequestQueueScreen> {
       setState(() {
         _requests = _applyFilter(all, _filter);
       });
-    } catch (e) {
-      if (mounted) {
+      if (_service.lastListFromCache && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to load requests: $e'),
-            backgroundColor: AppTheme.accentRed,
+            content: Text(
+              _service.lastListError ??
+                  'Showing cached parts requests. Cloud refresh failed.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 5),
           ),
+        );
+      }
+    } catch (e, st) {
+      if (mounted) {
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load requests. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PartsRequestQueue: load requests',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {
@@ -113,13 +129,15 @@ class _PartsRequestQueueScreenState extends State<PartsRequestQueueScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Approval failed: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Approval failed. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PartsRequestQueue: approve request',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {
@@ -178,13 +196,15 @@ class _PartsRequestQueueScreenState extends State<PartsRequestQueueScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Rejection failed: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Rejection failed. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PartsRequestQueue: reject request',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {

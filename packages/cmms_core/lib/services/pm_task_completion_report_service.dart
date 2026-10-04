@@ -13,23 +13,47 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:universal_html/html.dart' as html;
 
 import '../models/pm_task.dart';
+import '../utils/work_order_duration.dart';
 
 class PMTaskCompletionReportService {
-  static pw.Font? _interRegular;
-  static pw.Font? _interBold;
+  static pw.Font? _suisseRegular;
+  static pw.Font? _suisseBold;
 
   static Future<void> _ensureFontsLoaded() async {
-    if (_interRegular != null && _interBold != null) return;
+    if (_suisseRegular != null && _suisseBold != null) return;
+    const regularPaths = [
+      'packages/cmms_core/assets/fonts/SuisseIntl-Regular.ttf',
+      'assets/fonts/SuisseIntl-Regular.ttf',
+      'packages/cmms_core/assets/fonts/SuisseIntl-Regular.otf',
+      'assets/fonts/SuisseIntl-Regular.otf',
+    ];
+    const boldPaths = [
+      'packages/cmms_core/assets/fonts/SuisseIntl-Bold.ttf',
+      'assets/fonts/SuisseIntl-Bold.ttf',
+      'packages/cmms_core/assets/fonts/SuisseIntl-Bold.otf',
+      'assets/fonts/SuisseIntl-Bold.otf',
+    ];
     try {
-      final regularData = await rootBundle.load('assets/fonts/Inter-Regular.ttf');
-      final boldData = await rootBundle.load('assets/fonts/Inter-Bold.ttf');
-      _interRegular = pw.Font.ttf(regularData);
-      _interBold = pw.Font.ttf(boldData);
+      final regularData = await _loadFirstAsset(regularPaths);
+      final boldData = await _loadFirstAsset(boldPaths);
+      _suisseRegular = pw.Font.ttf(regularData);
+      _suisseBold = pw.Font.ttf(boldData);
     } catch (_) {
-      // Fallback to default fonts if Inter is not available
-      _interRegular = pw.Font.helvetica();
-      _interBold = pw.Font.helveticaBold();
+      _suisseRegular = pw.Font.helvetica();
+      _suisseBold = pw.Font.helveticaBold();
     }
+  }
+
+  static Future<ByteData> _loadFirstAsset(List<String> paths) async {
+    Object? lastError;
+    for (final path in paths) {
+      try {
+        return await rootBundle.load(path);
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? StateError('Font asset not found');
   }
 
   /// Build PDF content for a specific completion cycle
@@ -45,8 +69,8 @@ class PMTaskCompletionReportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(
-          base: _interRegular!,
-          bold: _interBold!,
+          base: _suisseRegular!,
+          bold: _suisseBold!,
         ),
         build: (context) => [
           // Beautiful Header with colored background
@@ -112,7 +136,7 @@ class PMTaskCompletionReportService {
                       ...pmTask.assignedTechnicians!.map((tech) {
                         final effort = pmTask.technicianEffortMinutes?[tech.id];
                         final effortText = effort != null && effort > 0
-                            ? ' - ${_formatDuration(Duration(minutes: effort))}'
+                            ? ' - ${formatWorkDurationSeconds(effort * 60)}'
                             : '';
                         return pw.Container(
                           margin: const pw.EdgeInsets.only(bottom: 6),
@@ -195,12 +219,19 @@ class PMTaskCompletionReportService {
                         if (completedAt != null)
                           _buildTimelineItem('Completed', _formatDate(completedAt), PdfColors.blue700),
                         if (durationSeconds != null && durationSeconds > 0)
-                          _buildTimelineItem('Duration', _formatDuration(Duration(seconds: durationSeconds)), PdfColors.orange700)
+                          _buildTimelineItem('Duration', formatWorkDurationSeconds(durationSeconds), PdfColors.orange700)
                         else if (startedAt != null && completedAt != null) ...[
                           () {
-                            final calculatedDuration = completedAt.difference(startedAt);
-                            if (calculatedDuration.inSeconds > 0) {
-                              return _buildTimelineItem('Duration', _formatDuration(calculatedDuration), PdfColors.orange700);
+                            final calculatedSeconds = calculateActiveDurationSeconds(
+                              start: startedAt,
+                              end: completedAt,
+                            );
+                            if (calculatedSeconds > 0) {
+                              return _buildTimelineItem(
+                                'Duration',
+                                formatWorkDurationSeconds(calculatedSeconds),
+                                PdfColors.orange700,
+                              );
                             }
                             return pw.SizedBox.shrink();
                           }(),
@@ -463,7 +494,7 @@ class PMTaskCompletionReportService {
                                   );
                                 }
                               }
-                            } catch (e) {
+                            } catch (e, st) {
                               print('⚠️ Error loading signature image: $e');
                             }
                             
@@ -521,8 +552,8 @@ class PMTaskCompletionReportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(32),
         theme: pw.ThemeData.withFont(
-          base: _interRegular!,
-          bold: _interBold!,
+          base: _suisseRegular!,
+          bold: _suisseBold!,
         ),
         build: (context) => [
           // Header
@@ -603,7 +634,7 @@ class PMTaskCompletionReportService {
                       ...pmTask.assignedTechnicians!.map((tech) {
                         final effort = pmTask.technicianEffortMinutes?[tech.id];
                         final effortText = effort != null && effort > 0
-                            ? ' - ${_formatDuration(Duration(minutes: effort))}'
+                            ? ' - ${formatWorkDurationSeconds(effort * 60)}'
                             : '';
                         return pw.Container(
                           margin: const pw.EdgeInsets.only(bottom: 6),
@@ -674,37 +705,47 @@ class PMTaskCompletionReportService {
                 final durationWidgets = <pw.Widget>[];
                 
                 if (pmTask.startedAt != null && pmTask.completedAt != null) {
-                  final totalElapsed = pmTask.completedAt!.difference(pmTask.startedAt!);
-                  final totalPausedSeconds = _calculateTotalPausedSeconds(pmTask);
-                  final actualWorkDuration = Duration(seconds: totalElapsed.inSeconds - totalPausedSeconds);
-                  
+                  final totalElapsedSeconds = elapsedSecondsBetween(
+                    pmTask.startedAt!,
+                    pmTask.completedAt!,
+                  );
+                  final actualWorkSeconds =
+                      calculatePmTaskDurationSeconds(pmTask) ?? 0;
+                  final totalPausedSeconds =
+                      totalElapsedSeconds - actualWorkSeconds;
+
                   durationWidgets.add(
                     _buildInfoRow(
                       'Total Duration',
-                      _formatDuration(totalElapsed),
+                      formatWorkDurationSeconds(totalElapsedSeconds),
                     ),
                   );
                   durationWidgets.add(
                     _buildInfoRow(
                       'Actual Work Duration',
-                      _formatDuration(actualWorkDuration),
+                      formatWorkDurationSeconds(actualWorkSeconds),
                     ),
                   );
                   if (totalPausedSeconds > 0) {
                     durationWidgets.add(
                       _buildInfoRow(
                         'Total Paused Time',
-                        _formatDuration(Duration(seconds: totalPausedSeconds)),
+                        formatWorkDurationSeconds(totalPausedSeconds),
                       ),
                     );
                   }
                 }
-                
+
                 if (pmTask.startedAt != null) {
                   durationWidgets.add(
                     _buildInfoRow(
                       'Time to Start',
-                      _formatDuration(pmTask.startedAt!.difference(pmTask.createdAt)),
+                      formatWorkDurationSeconds(
+                        elapsedSecondsBetween(
+                          pmTask.createdAt,
+                          pmTask.startedAt!,
+                        ),
+                      ),
                     ),
                   );
                 }
@@ -802,7 +843,7 @@ class PMTaskCompletionReportService {
                           if (startedAt != null)
                             _buildInfoRow('Started At', _formatDate(startedAt)),
                           if (durationSeconds != null)
-                            _buildInfoRow('Duration', _formatDuration(Duration(seconds: durationSeconds))),
+                            _buildInfoRow('Duration', formatWorkDurationSeconds(durationSeconds)),
                           if (completion['laborCost'] != null)
                             _buildInfoRow('Labor Cost', 'QAR ${(completion['laborCost'] as num).toStringAsFixed(2)}'),
                           if (completion['partsCost'] != null)
@@ -883,7 +924,9 @@ class PMTaskCompletionReportService {
                   final resumedAt = _parseDateTimeFromPauseHistory(pause['resumedAt']);
                   final reason = pause['reason'] as String? ?? 'No reason provided';
                   final duration = pausedAt != null && resumedAt != null
-                      ? _formatDuration(resumedAt.difference(pausedAt))
+                      ? formatWorkDurationSeconds(
+                          elapsedSecondsBetween(pausedAt, resumedAt),
+                        )
                       : 'Ongoing';
                   
                   return pw.Padding(
@@ -1072,7 +1115,7 @@ class PMTaskCompletionReportService {
 
           print('✅ PMTaskCompletionReportService: Report saved to $filePath');
           return filePath;
-        } catch (e) {
+        } catch (e, st) {
           // If getApplicationDocumentsDirectory fails, try using bytes method
           print('⚠️ PMTaskCompletionReportService: Failed to get directory, error: $e');
           print('   This might be a platform-specific issue. Please ensure path_provider is properly configured.');
@@ -1146,7 +1189,7 @@ class PMTaskCompletionReportService {
 
           print('✅ PMTaskCompletionReportService: Report saved to $filePath');
           return filePath;
-        } catch (e) {
+        } catch (e, st) {
           // If getApplicationDocumentsDirectory fails, try using bytes method
           print('⚠️ PMTaskCompletionReportService: Failed to get directory, error: $e');
           print('   This might be a platform-specific issue. Please ensure path_provider is properly configured.');
@@ -1289,9 +1332,15 @@ class PMTaskCompletionReportService {
           child: _buildSummaryCard(
             'Duration',
             durationSeconds != null && durationSeconds > 0
-                ? _formatDuration(Duration(seconds: durationSeconds))
+                ? formatWorkDurationSeconds(durationSeconds)
                 : (startedAt != null && completedAt != null
-                    ? _formatDuration(completedAt.difference(startedAt))
+                    ? formatWorkDurationSeconds(
+                        calculateActiveDurationSeconds(
+                          start: startedAt,
+                          end: completedAt,
+                          storedDurationSeconds: durationSeconds,
+                        ),
+                      )
                     : 'N/A'),
             PdfColors.blue700,
             0xe425, // timer icon code point
@@ -1460,17 +1509,6 @@ class PMTaskCompletionReportService {
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} '
       '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
 
-  static String _formatDuration(Duration duration) {
-    final totalSeconds = duration.inSeconds;
-    final hours = totalSeconds ~/ 3600;
-    final minutes = (totalSeconds % 3600) ~/ 60;
-    final seconds = totalSeconds % 60;
-    final hh = hours.toString().padLeft(2, '0');
-    final mm = minutes.toString().padLeft(2, '0');
-    final ss = seconds.toString().padLeft(2, '0');
-    return '$hh:$mm:$ss';
-  }
-
   static String _formatFrequency(PMTaskFrequency frequency) {
     switch (frequency) {
       case PMTaskFrequency.daily:
@@ -1539,30 +1577,6 @@ class PMTaskCompletionReportService {
     );
   }
 
-  static int _calculateTotalPausedSeconds(PMTask pmTask) {
-    int totalPausedSeconds = 0;
-    
-    if (pmTask.pauseHistory != null && pmTask.pauseHistory!.isNotEmpty) {
-      for (final pauseRecord in pmTask.pauseHistory!) {
-        final pausedAt = _parseDateTimeFromPauseHistory(pauseRecord['pausedAt']);
-        final resumedAt = _parseDateTimeFromPauseHistory(pauseRecord['resumedAt']);
-        
-        if (pausedAt != null && resumedAt != null) {
-          final pausedDuration = resumedAt.difference(pausedAt);
-          totalPausedSeconds += pausedDuration.inSeconds;
-        }
-      }
-    }
-    
-    // If currently paused, add the current pause duration
-    if (pmTask.isPaused && pmTask.pausedAt != null) {
-      final currentPauseDuration = DateTime.now().difference(pmTask.pausedAt!);
-      totalPausedSeconds += currentPauseDuration.inSeconds;
-    }
-    
-    return totalPausedSeconds;
-  }
-
   static DateTime? _parseDateTimeFromPauseHistory(dynamic value) {
     if (value == null) return null;
     if (value is DateTime) return value;
@@ -1600,7 +1614,7 @@ class PMTaskCompletionReportService {
         }
         return {'text': item.toString(), 'checked': false, 'required': false};
       }).toList();
-    } catch (e) {
+    } catch (e, st) {
       print('⚠️ Error parsing checklist: $e');
       return [];
     }
@@ -1624,7 +1638,7 @@ class PMTaskCompletionReportService {
       }
       
       return [];
-    } catch (e) {
+    } catch (e, st) {
       print('⚠️ Error parsing checklist from completion: $e');
       return [];
     }

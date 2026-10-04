@@ -5,6 +5,7 @@ import '../../utils/requestor_home_navigation.dart';
 import '../../utils/responsive_layout.dart';
 import '../../widgets/custom_app_bar.dart';
 import '../../widgets/requestor_more_menu.dart';
+import '../../utils/user_facing_errors.dart';
 
 class RequestorNotificationSettingsScreen extends StatefulWidget {
   const RequestorNotificationSettingsScreen({super.key});
@@ -57,7 +58,7 @@ class _RequestorNotificationSettingsScreenState
         _enableSMSNotifications = prefs.getBool('enable_sms_notifications') ?? false;
         _frequency = prefs.getString('notification_frequency') ?? 'immediate';
       });
-    } catch (e) {
+    } catch (e, st) {
       // Use defaults if error loading
     } finally {
       if (mounted) {
@@ -90,13 +91,15 @@ class _RequestorNotificationSettingsScreenState
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving preferences: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not save preferences. Please try again.',
+          stackTrace: st,
+          contextLabel: 'RequestorNotificationSettings: save',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }

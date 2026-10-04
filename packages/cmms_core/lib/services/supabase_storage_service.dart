@@ -3,19 +3,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'supabase_auth_service.dart';
+import '../config/locator.dart';
 
 /// Service for Supabase Storage access with authentication
 class SupabaseStorageService {
-  factory SupabaseStorageService() => _instance;
-  SupabaseStorageService._internal();
-  static final SupabaseStorageService _instance =
-      SupabaseStorageService._internal();
 
   SupabaseClient get _client => Supabase.instance.client;
 
   /// Ensure user is authenticated before making Storage requests
   Future<bool> _ensureAuthenticated() async {
-    final authService = SupabaseAuthService.instance;
+    final authService = sl<SupabaseAuthService>();
     final isAuthenticated = await authService.ensureAuthenticated();
     
     if (!isAuthenticated) {
@@ -79,6 +76,39 @@ class SupabaseStorageService {
       debugPrint('   Error type: ${e.runtimeType}');
       debugPrint('   Stack trace: $stackTrace');
       
+      return null;
+    }
+  }
+
+  /// Upload a file and return the storage object path (not public URL).
+  ///
+  /// Option A PM occurrences store `completionPhotoPath` as bucket path.
+  Future<String?> uploadFileReturningStoragePath({
+    required XFile file,
+    required String fileName,
+    String? folder,
+  }) async {
+    final isAuthenticated = await _ensureAuthenticated();
+    if (!isAuthenticated) {
+      debugPrint('User not authenticated for Supabase Storage access');
+      return null;
+    }
+
+    try {
+      final storagePath = folder != null ? '$folder/$fileName' : fileName;
+      final fileBytes = await file.readAsBytes();
+
+      await _client.storage.from('files').uploadBinary(
+            storagePath,
+            fileBytes,
+            fileOptions: const FileOptions(
+              upsert: true,
+            ),
+          );
+
+      return storagePath;
+    } on Exception catch (e) {
+      debugPrint('Upload error (storage path): $e');
       return null;
     }
   }
@@ -187,7 +217,7 @@ class SupabaseStorageService {
       final bytes = await _client.storage.from('files').download(storagePath);
       debugPrint('File downloaded successfully: ${bytes.length} bytes');
       return bytes;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Download error: $e');
       return null;
     }
@@ -214,7 +244,7 @@ class SupabaseStorageService {
 
       debugPrint('File deleted successfully');
       return true;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Delete error: $e');
       return false;
     }
@@ -237,7 +267,7 @@ class SupabaseStorageService {
 
       debugPrint('Supabase Storage connection successful');
       return true;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Supabase Storage connection error: $e');
       return false;
     }

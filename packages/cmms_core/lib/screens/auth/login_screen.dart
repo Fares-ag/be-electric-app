@@ -4,11 +4,15 @@ import 'package:provider/provider.dart';
 import '../../app/cmms_app_mode_scope.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/supabase_auth_service.dart';
+import '../../utils/auth_error_messages.dart';
+import '../../utils/user_facing_errors.dart';
+import '../../utils/login_attempt_policy.dart';
 import '../../utils/cmms_package_assets.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/responsive_layout.dart';
 import '../../widgets/legal_footer.dart';
 import '../../widgets/role_based_navigation.dart';
+import '../../config/locator.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -77,10 +81,11 @@ class _LoginScreenState extends State<LoginScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final email = emailController.text.trim();
 
-    if (email.isEmpty || !email.contains('@')) {
+    final emailError = validateLoginEmail(email);
+    if (emailError != null) {
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Please enter a valid email address.'),
+        SnackBar(
+          content: Text(emailError),
           backgroundColor: AppTheme.errorColor,
         ),
       );
@@ -88,7 +93,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     try {
-      await SupabaseAuthService.instance.resetPassword(email);
+      await sl<SupabaseAuthService>().resetPassword(email);
       messenger.showSnackBar(
         const SnackBar(
           content: Text(
@@ -99,14 +104,18 @@ class _LoginScreenState extends State<LoginScreen> {
           duration: Duration(seconds: 6),
         ),
       );
-    } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Could not send reset link: $e'),
+    } catch (e, st) {
+      if (mounted) {
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: kGenericPasswordResetErrorMessage,
+          stackTrace: st,
+          contextLabel: 'LoginScreen.forgotPassword',
           backgroundColor: AppTheme.errorColor,
           duration: const Duration(seconds: 5),
-        ),
-      );
+        );
+      }
     }
   }
 
@@ -115,19 +124,32 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (!mounted) return;
 
+    final email = _emailController.text.trim();
+    if (isLoginAttemptRateLimited(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(kLoginRateLimitedMessage),
+          backgroundColor: AppTheme.errorColor,
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     
-    debugPrint('🔐 Login attempt: ${_emailController.text.trim()}');
+    debugPrint('🔐 Login attempt: $email');
     
     try {
       final success = await authProvider.login(
-        _emailController.text.trim(),
+        email,
         _passwordController.text,
       );
 
       if (!mounted) return;
 
       if (success) {
+        clearLoginRateLimit(email);
         debugPrint('✅ Login successful - User authenticated');
         
         // Verify the auth state was updated
@@ -182,15 +204,15 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     } catch (e, stackTrace) {
-      debugPrint('❌ Login error: $e');
-      debugPrint('Stack trace: $stackTrace');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Login error: ${e.toString()}'),
-            backgroundColor: AppTheme.errorColor,
-            duration: const Duration(seconds: 5),
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: kGenericLoginErrorMessage,
+          stackTrace: stackTrace,
+          contextLabel: 'LoginScreen.login',
+          backgroundColor: AppTheme.errorColor,
+          duration: const Duration(seconds: 5),
         );
       }
     }
@@ -276,10 +298,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (value == null || value.isEmpty) {
                         return 'Please enter your email';
                       }
-                      if (!value.contains('@')) {
-                        return 'Please enter a valid email';
-                      }
-                      return null;
+                      return validateLoginEmail(value);
                     },
                   ),
                   const SizedBox(height: AppTheme.spacingM),

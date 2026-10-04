@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../../models/pm_task.dart';
 import '../../utils/app_theme.dart';
+import '../../widgets/offline_sync_indicators.dart';
 import 'pm_task_detail_screen.dart';
 
 /// Professional PM Task Card Widget
@@ -161,6 +162,8 @@ class PMTaskCardWidget extends StatelessWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  PMTaskPendingSyncBadge(pmTask: task),
                 ],
               ),
             ),

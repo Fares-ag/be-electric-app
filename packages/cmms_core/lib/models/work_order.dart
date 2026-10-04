@@ -106,6 +106,7 @@ class WorkOrder {
     this.reopenCount = 0,
     this.previousCompletionDate,
     this.previousStatus,
+    this.workDurationSeconds,
   })  : assignedTechnicianIds = assignedTechnicianIds ?? <String>[],
         technicianEffortMinutes = technicianEffortMinutes != null
             ? Map<String, int>.from(technicianEffortMinutes)
@@ -266,6 +267,7 @@ class WorkOrder {
                 orElse: () => WorkOrderStatus.open,
               )
             : null,
+        workDurationSeconds: _parseWorkDurationSeconds(data),
         firstResponseTime: _parseDate(data['firstResponseTime']),
         actualStartTime: _parseDate(data['actualStartTime']),
         actualEndTime: _parseDate(data['actualEndTime']),
@@ -299,6 +301,17 @@ class WorkOrder {
     if (value == null) return null;
     if (value is DateTime) return value;
     if (value is String) return DateTime.tryParse(value);
+    return null;
+  }
+
+  static int? _parseWorkDurationSeconds(Map<String, dynamic> data) {
+    final top = data['workDurationSeconds'];
+    if (top is num) return top.toInt();
+    final meta = data['metadata'];
+    if (meta is Map) {
+      final stored = meta['workDurationSeconds'];
+      if (stored is num) return stored.toInt();
+    }
     return null;
   }
 
@@ -478,6 +491,7 @@ class WorkOrder {
   final int reopenCount;
   final DateTime? previousCompletionDate;
   final WorkOrderStatus? previousStatus;
+  final int? workDurationSeconds;
 
   WorkOrder copyWith({
     String? id,
@@ -549,6 +563,7 @@ class WorkOrder {
     int? reopenCount,
     DateTime? previousCompletionDate,
     WorkOrderStatus? previousStatus,
+    int? workDurationSeconds,
   }) =>
       WorkOrder(
         id: id ?? this.id,
@@ -632,6 +647,7 @@ class WorkOrder {
         previousCompletionDate:
             previousCompletionDate ?? this.previousCompletionDate,
         previousStatus: previousStatus ?? this.previousStatus,
+        workDurationSeconds: workDurationSeconds ?? this.workDurationSeconds,
       );
 
   String get statusDisplayName {
@@ -812,6 +828,7 @@ class WorkOrder {
         'reopenCount': reopenCount,
         'previousCompletionDate': previousCompletionDate?.toIso8601String(),
         'previousStatus': previousStatus?.name,
+        'workDurationSeconds': workDurationSeconds,
       };
 }
 

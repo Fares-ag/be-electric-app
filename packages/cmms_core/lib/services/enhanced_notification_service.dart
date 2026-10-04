@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'realtime_supabase_service.dart';
 import 'supabase_database_service.dart';
+import '../config/locator.dart';
 
 enum NotificationType {
   workOrderCreated,
@@ -163,10 +164,6 @@ class EnhancedNotification {
 }
 
 class EnhancedNotificationService {
-  factory EnhancedNotificationService() => _instance;
-  EnhancedNotificationService._internal();
-  static final EnhancedNotificationService _instance =
-      EnhancedNotificationService._internal();
 
   final List<EnhancedNotification> _notifications = [];
   final StreamController<List<EnhancedNotification>> _notificationController =
@@ -174,7 +171,10 @@ class EnhancedNotificationService {
   final StreamController<EnhancedNotification> _newNotificationController =
       StreamController<EnhancedNotification>.broadcast();
   final SupabaseDatabaseService _firestoreService =
-      SupabaseDatabaseService.instance;
+      sl<SupabaseDatabaseService>();
+
+  bool _isInitialized = false;
+  Timer? _cleanupTimer;
   String? _realtimeUserId;
   bool _realtimeListening = false;
 
@@ -188,10 +188,13 @@ class EnhancedNotificationService {
   int get unreadCount => _notifications.where((n) => !n.isRead).length;
   int get totalCount => _notifications.length;
 
-  /// Initialize notification service
+  /// Loads persisted notifications once. Safe to call multiple times.
   Future<void> initialize() async {
+    if (_isInitialized) return;
+
     await _loadNotifications();
     _startPeriodicCleanup();
+    _isInitialized = true;
   }
 
   /// Load notifications from storage
@@ -205,7 +208,7 @@ class EnhancedNotificationService {
         _notifications.addAll(firestoreNotifications);
         debugPrint(
             'NotificationService: Loaded ${_notifications.length} notifications from Supabase',);
-      } catch (e) {
+      } catch (e, st) {
         debugPrint(
             'NotificationService: Supabase unavailable, loading from local storage: $e',);
         // Fallback to local storage
@@ -218,7 +221,7 @@ class EnhancedNotificationService {
           try {
             final notification = EnhancedNotification.fromMap(jsonDecode(json));
             _notifications.add(notification);
-          } catch (e) {
+          } catch (e, st) {
             debugPrint('Error loading notification: $e');
           }
         }
@@ -226,7 +229,7 @@ class EnhancedNotificationService {
 
       _notifications.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       _notificationController.add(_notifications);
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading notifications: $e');
     }
   }
@@ -239,7 +242,7 @@ class EnhancedNotificationService {
         try {
           await _firestoreService.saveNotification(_notifications.last);
           debugPrint('NotificationService: Saved notification to Supabase');
-        } catch (e) {
+        } catch (e, st) {
           debugPrint(
               'NotificationService: Supabase save failed, using local storage: $e',);
         }
@@ -250,7 +253,7 @@ class EnhancedNotificationService {
       final notificationsJson =
           _notifications.map((n) => jsonEncode(n.toMap())).toList();
       await prefs.setStringList('enhanced_notifications', notificationsJson);
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error saving notifications: $e');
     }
   }
@@ -365,8 +368,9 @@ class EnhancedNotificationService {
 
   /// Start periodic cleanup of expired notifications
   void _startPeriodicCleanup() {
-    Timer.periodic(const Duration(hours: 1), (timer) {
-      _cleanupExpiredNotifications();
+    _cleanupTimer?.cancel();
+    _cleanupTimer = Timer.periodic(const Duration(hours: 1), (_) {
+      unawaited(_cleanupExpiredNotifications());
     });
   }
 
@@ -614,6 +618,13 @@ class EnhancedNotificationService {
         },
       );
 
+  /// Cancels background work without closing broadcast streams (GetIt singleton).
+  void stopBackgroundWork() {
+    _cleanupTimer?.cancel();
+    _cleanupTimer = null;
+    stopRealtimeListener();
+  }
+
   /// Live INSERT/UPDATE for [userId] via Supabase Realtime (filtered).
   void startRealtimeListener(String userId) {
     if (userId.isEmpty) return;
@@ -622,7 +633,7 @@ class EnhancedNotificationService {
     stopRealtimeListener();
     _realtimeUserId = userId;
     _realtimeListening = true;
-    RealtimeSupabaseService.instance.listenToNotificationChanges(
+    sl<RealtimeSupabaseService>().listenToNotificationChanges(
       userId: userId,
       onChanged: () {
         unawaited(_loadNotifications());
@@ -632,15 +643,19 @@ class EnhancedNotificationService {
 
   void stopRealtimeListener() {
     if (!_realtimeListening && _realtimeUserId == null) return;
-    RealtimeSupabaseService.instance.stopListeningToNotificationChanges();
+    sl<RealtimeSupabaseService>().stopListeningToNotificationChanges();
     _realtimeListening = false;
     _realtimeUserId = null;
   }
 
-  /// Dispose resources
-  void dispose() {
-    stopRealtimeListener();
-    _notificationController.close();
-    _newNotificationController.close();
+  /// Test-only reset. GetIt singletons must stay alive for the app lifetime.
+  @visibleForTesting
+  void resetForTesting() {
+    stopBackgroundWork();
+    _isInitialized = false;
+    _notifications.clear();
+    if (!_notificationController.isClosed) {
+      _notificationController.add(_notifications);
+    }
   }
 }

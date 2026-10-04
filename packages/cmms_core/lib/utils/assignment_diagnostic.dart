@@ -1,10 +1,11 @@
 ﻿import 'package:flutter/material.dart';
 import '../services/unified_data_service.dart';
+import '../config/locator.dart';
 
 /// Diagnostic tool for troubleshooting technician assignment issues
 class AssignmentDiagnostic {
   static Future<Map<String, dynamic>> runDiagnostics() async {
-    final dataService = UnifiedDataService.instance;
+    final dataService = sl<UnifiedDataService>();
     final diagnostics = <String, dynamic>{};
 
     try {
@@ -149,7 +150,7 @@ class AssignmentDiagnostic {
       }
 
       return diagnostics;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ Error running assignment diagnostics: $e');
       diagnostics['error'] = e.toString();
       return diagnostics;

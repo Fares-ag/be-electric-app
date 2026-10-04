@@ -2,6 +2,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/release_safety.dart';
+
 /// Complete database wipe utility - deletes ALL data from Supabase and local storage
 class CompleteDatabaseWipe {
   static final SupabaseClient _supabase = Supabase.instance.client;
@@ -40,7 +42,7 @@ class CompleteDatabaseWipe {
             try {
               await _supabase.from(tableName).delete().eq('id', id);
               totalDeleted++;
-            } catch (e) {
+            } catch (e, st) {
               debugPrint('Error deleting $id: $e');
             }
           }
@@ -102,7 +104,7 @@ class CompleteDatabaseWipe {
 
       debugPrint('✅ Local storage cleared');
       debugPrint('🛡️ Sample data insertion BLOCKED');
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ Error clearing local storage: $e');
       rethrow;
     }
@@ -110,6 +112,10 @@ class CompleteDatabaseWipe {
 
   /// Complete database wipe (Firestore + Local Storage)
   static Future<Map<String, dynamic>> wipeEverything() async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) {
+      throw StateError('Complete database wipe is disabled in release builds');
+    }
+
     try {
       debugPrint('🗑️🗑️🗑️ STARTING COMPLETE DATABASE WIPE 🗑️🗑️🗑️');
 
@@ -133,7 +139,7 @@ class CompleteDatabaseWipe {
         'firestoreResults': firestoreResults,
         'totalDeleted': totalDeleted,
       };
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ Error during complete database wipe: $e');
       return {
         'success': false,
@@ -143,8 +149,10 @@ class CompleteDatabaseWipe {
   }
 
   /// Show confirmation dialog and execute wipe
-  static Future<void> showWipeConfirmationDialog(BuildContext context) async =>
-      showDialog(
+  static Future<void> showWipeConfirmationDialog(BuildContext context) async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) return;
+
+    return showDialog(
         context: context,
         barrierDismissible: false,
         builder: (BuildContext dialogContext) => AlertDialog(
@@ -244,6 +252,7 @@ class CompleteDatabaseWipe {
           ],
         ),
       );
+  }
 
   static Widget _buildDeleteItem(String text) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
@@ -329,7 +338,7 @@ class CompleteDatabaseWipe {
           );
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       // Close loading dialog
       if (context.mounted) {
         Navigator.of(context).pop();

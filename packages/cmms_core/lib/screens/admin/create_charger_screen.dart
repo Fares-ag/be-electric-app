@@ -4,6 +4,9 @@ import '../../models/asset.dart';
 import '../../models/company.dart';
 import '../../services/unified_data_service.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/charger_asset_filter.dart';
+import '../../config/locator.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CreateChargerScreen extends StatefulWidget {
   final Company company;
@@ -35,18 +38,24 @@ class _CreateChargerScreenState extends State<CreateChargerScreen> {
   @override
   void initState() {
     super.initState();
+    _nameController.addListener(_syncDerivedManufacturer);
     // Populate fields if editing
     if (widget.charger != null) {
       _nameController.text = widget.charger!.name;
       _locationController.text = widget.charger!.location;
-      _manufacturerController.text = widget.charger!.manufacturer ?? '';
       _modelController.text = widget.charger!.model ?? '';
       _serialNumberController.text = widget.charger!.serialNumber ?? '';
       _descriptionController.text = widget.charger!.description ?? '';
       _assetTagController.text = widget.charger!.qrCodeId ?? widget.charger!.qrCode ?? '';
       _status = widget.charger!.status;
-      _chargerType = widget.charger!.manufacturer;
+      _chargerType = resolveChargerManufacturer(widget.charger!);
+      _syncDerivedManufacturer();
     }
+  }
+
+  void _syncDerivedManufacturer() {
+    _manufacturerController.text =
+        deriveChargerManufacturerFromName(_nameController.text);
   }
 
   @override
@@ -84,11 +93,11 @@ class _CreateChargerScreenState extends State<CreateChargerScreen> {
         name = _nameController.text.trim();
         location = _locationController.text.trim();
         description = _descriptionController.text.trim();
-        manufacturer = _manufacturerController.text.trim();
+        manufacturer = deriveChargerManufacturerFromName(name);
         model = _modelController.text.trim();
         serialNumber = _serialNumberController.text.trim();
         assetTag = _assetTagController.text.trim();
-      } catch (e) {
+      } catch (e, st) {
         throw Exception('Error reading form fields: $e');
       }
 
@@ -126,7 +135,7 @@ class _CreateChargerScreenState extends State<CreateChargerScreen> {
 
       if (widget.charger == null) {
         // Create new charger
-        final unifiedService = UnifiedDataService.instance;
+        final unifiedService = sl<UnifiedDataService>();
         await unifiedService.createAsset(charger);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -139,7 +148,7 @@ class _CreateChargerScreenState extends State<CreateChargerScreen> {
         }
       } else {
         // Update existing charger via UnifiedDataService so local cache is refreshed
-        await UnifiedDataService.instance.updateAsset(
+        await sl<UnifiedDataService>().updateAsset(
           widget.charger!.id,
           charger,
         );
@@ -153,13 +162,15 @@ class _CreateChargerScreenState extends State<CreateChargerScreen> {
           Navigator.pop(context, true);
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving charger: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not save charger. Please try again.',
+          stackTrace: st,
+          contextLabel: 'CreateCharger: save',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {
@@ -241,19 +252,10 @@ class _CreateChargerScreenState extends State<CreateChargerScreen> {
                 onChanged: (value) {
                   setState(() {
                     _chargerType = value;
-                    if (value != null) {
-                      _manufacturerController.text = value;
-                      // Auto-generate name if empty
-                      if (_nameController.text.trim().isEmpty) {
-                        _nameController.text = '$value Charger';
-                      }
-                      // Update hints based on charger type
-                      if (value == 'Kostad') {
-                        // Kostad format hints
-                      } else if (value == 'Siemens') {
-                        // Siemens format hints
-                      }
+                    if (value != null && _nameController.text.trim().isEmpty) {
+                      _nameController.text = '$value Charger';
                     }
+                    _syncDerivedManufacturer();
                   });
                 },
               ),
@@ -318,9 +320,12 @@ class _CreateChargerScreenState extends State<CreateChargerScreen> {
               const SizedBox(height: AppTheme.spacingM),
               TextFormField(
                 controller: _manufacturerController,
+                readOnly: true,
                 decoration: const InputDecoration(
                   labelText: 'Manufacturer',
-                  hintText: 'e.g., Siemens, Kostad',
+                  hintText: 'Derived from charger name',
+                  helperText:
+                      'KOS* names → Kostad; all others → Siemens (matches Supabase)',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.business),
                 ),

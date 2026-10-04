@@ -1,4 +1,6 @@
 import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -6,13 +8,16 @@ import '../../app/cmms_app_mode_scope.dart';
 import '../../config/cmms_app_mode.dart';
 import '../../models/work_order.dart';
 import '../../providers/unified_data_provider.dart';
-import '../../services/supabase_storage_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/edit_photo_upload_decision.dart';
+import '../../utils/requestor_category_mapper.dart';
 import '../../utils/requestor_home_navigation.dart';
 import '../../utils/responsive_layout.dart';
 import '../../widgets/authenticated_image.dart';
 import '../../widgets/custom_app_bar.dart';
 import '../../widgets/requestor_more_menu.dart';
+import '../../utils/user_facing_errors.dart';
 
 class EditRequestScreen extends StatefulWidget {
   const EditRequestScreen({
@@ -29,12 +34,11 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
   final _formKey = GlobalKey<FormState>();
   final _problemDescriptionController = TextEditingController();
   bool _isLoading = false;
-  WorkOrderPriority _selectedPriority = WorkOrderPriority.medium;
-  RepairCategory _selectedCategory = RepairCategory.reactive;
+  String _selectedCategoryIssue = kRequestorCategoryIssueOptions.last;
 
   // Photos: keep existing URLs editable + new captures/uploads
   final ImagePicker _picker = ImagePicker();
-  final SupabaseStorageService _storageService = SupabaseStorageService();
+  final _workOrderRepository = CmmsRepositories.workOrders;
   late List<String> _existingProblemPhotoUrls;
   final List<XFile> _newLocalPhotos = [];
 
@@ -42,8 +46,9 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
   void initState() {
     super.initState();
     _problemDescriptionController.text = widget.workOrder.problemDescription;
-    _selectedPriority = widget.workOrder.priority;
-    _selectedCategory = widget.workOrder.category ?? RepairCategory.reactive;
+    _selectedCategoryIssue = resolveRequestorCategoryIssueLabel(
+      widget.workOrder.category,
+    );
     _existingProblemPhotoUrls = widget.workOrder.photoPaths != null &&
             widget.workOrder.photoPaths!.isNotEmpty
         ? List<String>.from(widget.workOrder.photoPaths!)
@@ -72,13 +77,15 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
           _newLocalPhotos.add(photo);
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error capturing photo: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not capture photo. Please try again.',
+          stackTrace: st,
+          contextLabel: 'edit_request_screen: Could not capture photo. Pleas',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -109,13 +116,15 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
           _newLocalPhotos.add(photo);
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error picking photos: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not pick photos. Please try again.',
+          stackTrace: st,
+          contextLabel: 'edit_request_screen: Could not pick photos. Please ',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -161,9 +170,11 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
           Provider.of<UnifiedDataProvider>(context, listen: false);
 
       final photoUrls = List<String>.from(_existingProblemPhotoUrls);
+      var newPhotoFailCount = 0;
+      var newPhotoUploadedCount = 0;
       for (var i = 0; i < _newLocalPhotos.length; i++) {
         try {
-          final url = await _storageService.uploadFile(
+          final url = await _workOrderRepository.uploadFile(
             file: _newLocalPhotos[i],
             fileName:
                 'request_${widget.workOrder.id}_${DateTime.now().millisecondsSinceEpoch}_$i.jpg',
@@ -171,27 +182,33 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
           );
           if (url != null && url.isNotEmpty) {
             photoUrls.add(url);
+            newPhotoUploadedCount++;
+          } else {
+            newPhotoFailCount++;
           }
-        } catch (e) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Error uploading a photo: $e'),
-                backgroundColor: AppTheme.accentRed,
-              ),
-            );
-            setState(() {
-              _isLoading = false;
-            });
-            return;
-          }
+        } catch (e, st) {
+          newPhotoFailCount++;
+          debugPrint('Error uploading edit photo $i: $e');
         }
       }
 
+      final uploadDecision = evaluateEditPhotoUpload(
+        newPhotoCount: _newLocalPhotos.length,
+        uploadedCount: newPhotoUploadedCount,
+        failCount: newPhotoFailCount,
+      );
+
+      if (!uploadDecision.shouldSaveChanges) {
+        return;
+      }
+
+      final submissionFields =
+          mapRequestorCategoryIssue(_selectedCategoryIssue);
+
       final updatedWorkOrder = widget.workOrder.copyWith(
         problemDescription: _problemDescriptionController.text.trim(),
-        priority: _selectedPriority,
-        category: _selectedCategory,
+        priority: submissionFields.priority,
+        category: submissionFields.category,
         photoPath: photoUrls.isNotEmpty ? photoUrls.first : null,
         photoPaths: photoUrls,
         updatedAt: DateTime.now(),
@@ -200,23 +217,45 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
       await unifiedProvider.updateWorkOrder(updatedWorkOrder);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Request updated successfully!'),
-            backgroundColor: AppTheme.accentGreen,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        final messenger = ScaffoldMessenger.of(context);
+        if (uploadDecision.partialSuccessMessage != null) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(uploadDecision.partialSuccessMessage!),
+              backgroundColor: Colors.orange.shade700,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 6),
+            ),
+          );
+        } else if (uploadDecision.allNewPhotosFailedMessage != null) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(uploadDecision.allNewPhotosFailedMessage!),
+              backgroundColor: Colors.orange.shade700,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 6),
+            ),
+          );
+        } else {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Request updated successfully!'),
+              backgroundColor: AppTheme.accentGreen,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
         Navigator.pop(context, true);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating request: $e'),
-            backgroundColor: AppTheme.accentRed,
-            behavior: SnackBarBehavior.floating,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not update request. Please try again.',
+          stackTrace: st,
+          contextLabel: 'edit_request_screen: Could not update request. Plea',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {
@@ -293,9 +332,7 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _buildPriorityField(),
-                  const SizedBox(height: AppTheme.spacingL),
-                  _buildCategoryField(),
+                  _buildCategoryIssueField(),
                   const SizedBox(height: AppTheme.spacingL),
                   _buildPhotoSection(),
                 ],
@@ -319,9 +356,7 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
         const SizedBox(height: AppTheme.spacingL),
         _buildProblemDescriptionField(),
         const SizedBox(height: AppTheme.spacingL),
-        _buildPriorityField(),
-        const SizedBox(height: AppTheme.spacingL),
-        _buildCategoryField(),
+        _buildCategoryIssueField(),
         const SizedBox(height: AppTheme.spacingL),
         _buildPhotoSection(),
         const SizedBox(height: AppTheme.spacingL),
@@ -415,11 +450,11 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
     );
   }
 
-  Widget _buildPriorityField() {
-    return DropdownButtonFormField<WorkOrderPriority>(
-      value: _selectedPriority,
+  Widget _buildCategoryIssueField() {
+    return DropdownButtonFormField<String>(
+      value: _selectedCategoryIssue,
       decoration: InputDecoration(
-        labelText: 'Priority *',
+        labelText: 'Category Issue *',
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppTheme.radiusS),
         ),
@@ -431,56 +466,18 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
           ),
         ),
       ),
-      items: WorkOrderPriority.values
+      items: kRequestorCategoryIssueOptions
           .map(
-            (priority) => DropdownMenuItem(
-              value: priority,
-              child: Text(priority.name.toUpperCase()),
+            (label) => DropdownMenuItem(
+              value: label,
+              child: Text(label),
             ),
           )
           .toList(),
       onChanged: (value) {
         if (value != null) {
           setState(() {
-            _selectedPriority = value;
-          });
-        }
-      },
-    );
-  }
-
-  Widget _buildCategoryField() {
-    return DropdownButtonFormField<RepairCategory>(
-      value: _selectedCategory,
-      decoration: InputDecoration(
-        labelText: 'Category *',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppTheme.radiusS),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppTheme.radiusS),
-          borderSide: const BorderSide(
-            color: AppTheme.accentBlue,
-            width: 2,
-          ),
-        ),
-      ),
-      items: RepairCategory.values
-          .map(
-            (category) => DropdownMenuItem(
-              value: category,
-              child: Text(
-                category.name
-                    .replaceAll(RegExp('([A-Z])'), r' $1')
-                    .trim(),
-              ),
-            ),
-          )
-          .toList(),
-      onChanged: (value) {
-        if (value != null) {
-          setState(() {
-            _selectedCategory = value;
+            _selectedCategoryIssue = value;
           });
         }
       },

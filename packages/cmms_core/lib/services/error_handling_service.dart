@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 /// In production, set [crashReportingCallback] (e.g. to Firebase Crashlytics
 /// or Sentry) so errors are reported. Otherwise only debug logging is used.
 class ErrorHandlingService {
-  ErrorHandlingService._();
 
   /// Optional callback for production crash reporting (Firebase Crashlytics, Sentry, etc.).
   /// Set from main() after WidgetsFlutterBinding.ensureInitialized().

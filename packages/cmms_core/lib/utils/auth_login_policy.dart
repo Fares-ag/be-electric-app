@@ -31,3 +31,21 @@ bool shouldAutoCreateUserOnLogin({required bool autoCreateUsersOnLogin}) {
 bool isSessionAuthorized({required bool hasDatabaseUser}) {
   return hasDatabaseUser;
 }
+
+/// Whether [SharedPreferences] session restore is allowed outside Supabase Auth.
+bool shouldAllowLocalSessionRestore({required bool isReleaseMode}) {
+  return !isReleaseMode;
+}
+
+/// Whether passwordless database email lookup auth is allowed (debug tooling only).
+bool shouldAllowDebugDatabaseAuth({
+  required bool isReleaseMode,
+  required bool isDebugMode,
+}) {
+  return !isReleaseMode && isDebugMode;
+}
+
+/// Whether hardcoded demo-user fallback login is allowed.
+bool shouldAllowDemoUserFallback({required bool isDemoMode}) {
+  return isDemoMode;
+}

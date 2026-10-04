@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/locator.dart';
 import '../../models/user.dart';
 import '../../models/work_order.dart';
 import '../../providers/auth_provider.dart';
@@ -8,6 +9,7 @@ import '../../providers/unified_data_provider.dart';
 import '../../services/supabase_database_service.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/responsive_layout.dart';
+import '../../widgets/offline_sync_indicators.dart';
 import '../../widgets/technician_assignment_dialog.dart';
 import 'create_work_request_screen.dart';
 import 'work_order_detail_screen.dart';
@@ -589,6 +591,7 @@ class _WorkOrderListScreenState extends State<WorkOrderListScreen> {
                           ],
                         ),
                       ),
+                      WorkOrderPendingSyncBadge(workOrder: workOrder),
                       const SizedBox(width: 8),
                       // Ticket number – orange background extends to right edge
                       Expanded(
@@ -1087,8 +1090,8 @@ class _WorkOrderListScreenState extends State<WorkOrderListScreen> {
     }
 
     try {
-      final supabaseService = SupabaseDatabaseService.instance;
-      final company = await supabaseService.getCompanyById(companyId);
+      final company =
+          await sl<SupabaseDatabaseService>().getCompanyById(companyId);
       final companyName = company?.name;
 
       // Cache the result

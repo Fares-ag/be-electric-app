@@ -27,11 +27,6 @@ class _InventoryListScreenState extends State<InventoryListScreen> {
   Future<void> _loadInventory() async {
     final inventoryProvider =
         Provider.of<InventoryProvider>(context, listen: false);
-    final unifiedProvider =
-        Provider.of<UnifiedDataProvider>(context, listen: false);
-
-    // Connect InventoryProvider to UnifiedDataProvider
-    inventoryProvider.setUnifiedDataProvider(unifiedProvider);
 
     await inventoryProvider.loadInventory();
   }

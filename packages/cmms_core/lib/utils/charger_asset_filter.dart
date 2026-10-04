@@ -1,4 +1,56 @@
 import '../models/asset.dart';
+import '../models/work_order.dart';
+
+/// Kostad chargers use asset names starting with `KOS`; all others are Siemens.
+/// Matches Supabase trigger + admin web [charger-manufacturer.ts].
+String deriveChargerManufacturerFromName(String name) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) {
+    return 'Siemens';
+  }
+  if (trimmed.toUpperCase().startsWith('KOS')) {
+    return 'Kostad';
+  }
+  return 'Siemens';
+}
+
+/// Normalizes admin-set manufacturer/vendor to Siemens or Kostad when recognizable.
+String normalizeChargerBrand(String value) {
+  final v = value.trim().toLowerCase();
+  if (v.contains('kostad')) {
+    return 'Kostad';
+  }
+  if (v.contains('siemens') ||
+      v.contains('sicharge') ||
+      v.contains('versicharge')) {
+    return 'Siemens';
+  }
+  return value.trim();
+}
+
+/// Manufacturer for display/filtering: prefer admin DB fields, then name heuristics.
+String resolveChargerManufacturer(Asset asset) {
+  if (isChargerLikeAsset(asset)) {
+    final fromDb =
+        _nonEmptyTrim(asset.manufacturer) ?? _nonEmptyTrim(asset.vendor);
+    if (fromDb != null) {
+      return normalizeChargerBrand(fromDb);
+    }
+    return deriveChargerManufacturerFromName(asset.name);
+  }
+  return _nonEmptyTrim(asset.manufacturer) ??
+      _nonEmptyTrim(asset.vendor) ??
+      deriveChargerManufacturerFromName(asset.name);
+}
+
+/// Work order detail: derived from linked asset when hydrated.
+String? resolveWorkOrderChargerManufacturer(WorkOrder workOrder) {
+  final asset = workOrder.asset;
+  if (asset == null) {
+    return null;
+  }
+  return resolveChargerManufacturer(asset);
+}
 
 /// Treat as charger if name/type/category contains "charger" or EV power pattern
 /// (e.g. 60kW.DC). Same rules as the admin company chargers list.
@@ -28,6 +80,9 @@ bool isChargerLikeAsset(Asset asset) {
       m.contains('kec') ||
       m.contains('sicharge') ||
       m.contains('versicharge')) {
+    return true;
+  }
+  if (name.toUpperCase().startsWith('KOS')) {
     return true;
   }
   final extra = '${asset.description ?? ''} ${asset.notes ?? ''}'.toLowerCase();
@@ -62,12 +117,16 @@ bool _textImpliesChargerBrand(String brandLower, String text) {
   return false;
 }
 
-/// Matches [brand] (e.g. `Siemens`, `Kostad`) using manufacturer, vendor, name,
-/// model, description, category, item type, notes (admin data is often in text fields only).
+/// Matches [brand] (e.g. `Siemens`, `Kostad`) using name-derived manufacturer first,
+/// then DB fields, then legacy text heuristics.
 bool matchesChargerBrand(Asset asset, String brand) {
   final b = brand.trim().toLowerCase();
   if (b.isEmpty) {
     return false;
+  }
+
+  if (isChargerLikeAsset(asset)) {
+    return resolveChargerManufacturer(asset).toLowerCase() == b;
   }
 
   final fromFields = _nonEmptyTrim(asset.manufacturer) ??
@@ -98,6 +157,80 @@ bool matchesChargerBrand(Asset asset, String brand) {
   // Legacy simple substring in name / model
   return asset.name.toLowerCase().contains(b) ||
       (asset.model ?? '').toLowerCase().contains(b);
+}
+
+/// Chargers shown on create-work-order: charger-like + brand, optionally company.
+List<Asset> chargersForCreateForm({
+  required Iterable<Asset> assets,
+  required String manufacturer,
+  String? companyId,
+  bool restrictToCompany = false,
+}) {
+  final brand = manufacturer.trim();
+  if (brand.isEmpty) {
+    return const [];
+  }
+
+  final filtered = assets.where((asset) {
+    if (!isChargerLikeAsset(asset)) {
+      return false;
+    }
+    if (!matchesChargerBrand(asset, brand)) {
+      return false;
+    }
+    if (restrictToCompany) {
+      final id = companyId?.trim() ?? '';
+      if (id.isEmpty) {
+        return false;
+      }
+      return assetBelongsToUserCompany(asset, id);
+    }
+    return true;
+  }).toList()
+    ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+  return filtered;
+}
+
+/// Siemens or Kostad for create-form dropdowns. Falls back to the name rule.
+String createFormChargerBrand(Asset asset) {
+  final resolved = resolveChargerManufacturer(asset);
+  if (resolved == 'Siemens' || resolved == 'Kostad') {
+    return resolved;
+  }
+  return deriveChargerManufacturerFromName(asset.name);
+}
+
+/// Charger a technician adds when it is not already in the catalog.
+Asset buildFieldAddedCharger({
+  required String name,
+  required String location,
+  required String manufacturer,
+  required String id,
+  String? serialNumber,
+  String? assetTag,
+  String? companyId,
+  DateTime? now,
+}) {
+  final stamp = now ?? DateTime.now();
+  final serial = _nonEmptyTrim(serialNumber);
+  final tag = _nonEmptyTrim(assetTag);
+  final company = _nonEmptyTrim(companyId);
+  return Asset(
+    id: id,
+    name: name.trim(),
+    location: location.trim(),
+    manufacturer: manufacturer.trim(),
+    serialNumber: serial,
+    qrCode: tag,
+    qrCodeId: tag,
+    status: 'active',
+    itemType: 'charger',
+    category: 'charger',
+    companyId: company,
+    createdAt: stamp,
+    updatedAt: stamp,
+  );
 }
 
 /// True if [asset] is in the same tenant as the signed-in user.

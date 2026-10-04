@@ -4,6 +4,8 @@
 import 'package:flutter/material.dart';
 import '../../services/hybrid_dam_service.dart';
 import '../../utils/app_theme.dart';
+import '../../config/locator.dart';
+import '../../utils/user_facing_errors.dart';
 
 class DAMConfigScreen extends StatefulWidget {
   const DAMConfigScreen({super.key});
@@ -58,7 +60,7 @@ class _DAMConfigScreenState extends State<DAMConfigScreen> {
     });
 
     try {
-      final damService = HybridDamService();
+      final damService = sl<HybridDamService>();
       await damService.initialize();
       const isConnected = true; // Hybrid DAM Service always connects
 
@@ -76,7 +78,7 @@ class _DAMConfigScreenState extends State<DAMConfigScreen> {
           ),
         );
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       if (!mounted) return;
       setState(() {
         _connectionSuccessful = false;
@@ -96,7 +98,7 @@ class _DAMConfigScreenState extends State<DAMConfigScreen> {
     });
 
     try {
-      final damService = HybridDamService();
+      final damService = sl<HybridDamService>();
       final assets = await damService.getAllAssets();
 
       if (mounted) {
@@ -108,13 +110,15 @@ class _DAMConfigScreenState extends State<DAMConfigScreen> {
           ),
         );
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error pulling assets: $e'),
-            backgroundColor: Colors.red,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not pull assets. Please try again.',
+          stackTrace: st,
+          contextLabel: 'DamConfig: pull assets',
+          backgroundColor: Colors.red,
         );
       }
     } finally {
@@ -131,7 +135,7 @@ class _DAMConfigScreenState extends State<DAMConfigScreen> {
     });
 
     try {
-      final damService = HybridDamService();
+      final damService = sl<HybridDamService>();
       final assets = await damService.getAllAssets();
       final categories = assets
           .map((asset) => asset.category)
@@ -160,13 +164,15 @@ class _DAMConfigScreenState extends State<DAMConfigScreen> {
           ),
         );
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading categories/locations: $e'),
-            backgroundColor: Colors.red,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load categories or locations. Please try again.',
+          stackTrace: st,
+          contextLabel: 'DamConfig: load categories',
+          backgroundColor: Colors.red,
         );
       }
     } finally {

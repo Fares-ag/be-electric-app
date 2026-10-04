@@ -6,6 +6,8 @@ import '../models/asset.dart';
 import '../services/hybrid_dam_service.dart';
 import '../theme/unified_design_system.dart';
 import 'professional_asset_display_widget.dart';
+import '../config/locator.dart';
+import '../utils/user_facing_errors.dart';
 
 class ProfessionalAssetSelectionWidget extends StatefulWidget {
   const ProfessionalAssetSelectionWidget({
@@ -28,7 +30,7 @@ class ProfessionalAssetSelectionWidget extends StatefulWidget {
 
 class _ProfessionalAssetSelectionWidgetState
     extends State<ProfessionalAssetSelectionWidget> {
-  final HybridDamService _hybridService = HybridDamService();
+  final HybridDamService _hybridService = sl<HybridDamService>();
   final TextEditingController _searchController = TextEditingController();
 
   List<Asset> _assets = [];
@@ -65,14 +67,16 @@ class _ProfessionalAssetSelectionWidgetState
         _filteredAssets = assets;
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load assets: $e'),
-            backgroundColor: UnifiedDesignSystem.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load assets. Please try again.',
+          stackTrace: st,
+          contextLabel: 'professional_asset_selection_widget: Could not load assets. Please ',
+          backgroundColor: UnifiedDesignSystem.accentRed,
         );
       }
     }

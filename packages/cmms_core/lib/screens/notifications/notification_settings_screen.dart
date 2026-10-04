@@ -4,6 +4,7 @@ import '../../config/service_locator.dart';
 import '../../models/analytics_models.dart';
 import '../../services/analytics/analytics_service.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -36,16 +37,18 @@ class _NotificationSettingsScreenState
         _notificationSettings = settings;
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading notification settings: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load notification settings. Please try again.',
+          stackTrace: st,
+          contextLabel: 'NotificationSettings: load',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     }
@@ -61,13 +64,15 @@ class _NotificationSettingsScreenState
       setState(() {
         _notificationSettings[type] = enabled;
       });
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating notification setting: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not update notification setting. Please try again.',
+          stackTrace: st,
+          contextLabel: 'NotificationSettings: update',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     }
@@ -106,7 +111,7 @@ class _NotificationSettingsScreenState
 
                     _buildSettingCard(
                       'Enable Notifications',
-                      'Receive push notifications for important events',
+                      'Receive in-app notifications for important events',
                       Icons.notifications,
                       true, // This would be a general setting
                       (value) {

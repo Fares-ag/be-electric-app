@@ -1,5 +1,6 @@
 import '../models/user.dart';
 import '../services/supabase_database_service.dart';
+import '../config/locator.dart';
 
 /// Utility to clean up fake "Unknown" users and duplicates from the database
 class CleanupUnknownUsers {
@@ -28,7 +29,7 @@ class CleanupUnknownUsers {
     print('🧹 Starting cleanup from Supabase...');
     print('   Include duplicates: $includeDuplicates');
 
-    final firestore = SupabaseDatabaseService.instance;
+    final firestore = sl<SupabaseDatabaseService>();
     final allUsers = await firestore.getAllUsers();
     var deletedCount = 0;
 
@@ -61,7 +62,7 @@ class CleanupUnknownUsers {
               print(
                 '🗑️ Deleted older duplicate from Firestore: ${existingUser.name} (${existingUser.email})',
               );
-            } catch (e) {
+            } catch (e, st) {
               print('❌ Failed to delete duplicate ${existingUser.id}: $e');
             }
             emailTracker[user.email] = user;
@@ -82,7 +83,7 @@ class CleanupUnknownUsers {
         try {
           await firestore.deleteUser(user.id);
           deletedCount++;
-        } catch (e) {
+        } catch (e, st) {
           print('❌ Failed to delete user from Firestore ${user.id}: $e');
         }
       }
@@ -109,7 +110,7 @@ class CleanupUnknownUsers {
   static Future<Map<String, dynamic>> analyzeDuplicates() async {
     print('🔍 Analyzing Firestore for duplicates...');
 
-    final firestore = SupabaseDatabaseService.instance;
+    final firestore = sl<SupabaseDatabaseService>();
     final allUsers = await firestore.getAllUsers();
     final duplicates = findDuplicates(allUsers);
 

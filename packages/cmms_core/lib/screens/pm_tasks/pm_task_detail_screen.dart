@@ -7,16 +7,21 @@ import 'package:provider/provider.dart';
 import '../../models/activity_log.dart';
 import '../../models/pm_task.dart';
 import '../../models/user.dart';
+import '../../config/app_config.dart';
+import '../../config/locator.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
 import '../../services/activity_log_service.dart';
+import '../../services/connectivity_service.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/work_order_duration.dart';
 import '../../widgets/activity_history_timeline.dart';
 import '../../widgets/authenticated_image.dart';
 import '../../widgets/pause_reason_dialog.dart';
 import '../../widgets/work_timer.dart';
 import '../../services/pm_task_completion_report_service.dart';
 import 'pm_task_completion_screen.dart';
+import '../../utils/user_facing_errors.dart';
 
 class PMTaskDetailScreen extends StatefulWidget {
   const PMTaskDetailScreen({
@@ -32,7 +37,7 @@ class PMTaskDetailScreen extends StatefulWidget {
 class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
   bool _isLoading = false;
   late PMTask _currentPMTask;
-  final ActivityLogService _activityLogService = ActivityLogService();
+  final ActivityLogService _activityLogService = sl<ActivityLogService>();
 
   @override
   void initState() {
@@ -106,11 +111,10 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
         primaryTechnicianId: assignedIds.isNotEmpty ? assignedIds.first : _currentPMTask.primaryTechnicianId,
       );
 
-      await unifiedProvider.updatePMTask(updatedPMTask);
+      final resultPMTask = await unifiedProvider.updatePMTask(updatedPMTask);
+      if (!mounted) return;
 
-      if (mounted) {
-        // Log activity with completion cycle number
-        if (authProvider.currentUser != null) {
+      if (authProvider.currentUser != null) {
           // Determine completion cycle number
           final completionCycle = _getCurrentCompletionCycle();
           await _activityLogService.logActivity(
@@ -128,23 +132,35 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
           );
         }
 
-        // Refresh PM task from provider to get the latest state with correct startedAt
-        _refreshPMTaskFromProvider();
-        
+      setState(() {
+        _currentPMTask = resultPMTask;
+      });
+
+      _refreshPMTaskFromProvider();
+
+      if (mounted) {
+        final startedOffline = AppConfig.isOfflineModeEnabled &&
+            (!sl<ConnectivityService>().isOnline || resultPMTask.isOffline);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('PM task started successfully'),
+          SnackBar(
+            content: Text(
+              startedOffline
+                  ? 'PM task started locally — pending sync when online'
+                  : 'PM task started successfully',
+            ),
             backgroundColor: AppTheme.successColor,
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error starting PM task: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not start PM task. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PmTaskDetail: start PM task',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {
@@ -195,20 +211,28 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
           });
 
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('PM task paused'),
+            SnackBar(
+              content: Text(
+                (AppConfig.isOfflineModeEnabled &&
+                        (!sl<ConnectivityService>().isOnline ||
+                            updatedPMTask.isOffline))
+                    ? 'PM task paused locally — pending sync when online'
+                    : 'PM task paused',
+              ),
               backgroundColor: AppTheme.warningColor,
             ),
           );
         }
-      } catch (e) {
+      } catch (e, st) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error pausing PM task: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not pause PM task. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PmTaskDetail: pause PM task',
+          backgroundColor: AppTheme.errorColor,
+        );
         }
       } finally {
         if (mounted) setState(() => _isLoading = false);
@@ -249,19 +273,27 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('PM task resumed'),
+          SnackBar(
+            content: Text(
+              (AppConfig.isOfflineModeEnabled &&
+                      (!sl<ConnectivityService>().isOnline ||
+                          updatedPMTask.isOffline))
+                  ? 'PM task resumed locally — pending sync when online'
+                  : 'PM task resumed',
+            ),
             backgroundColor: AppTheme.successColor,
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error resuming PM task: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not resume PM task. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PmTaskDetail: resume PM task',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {
@@ -347,7 +379,7 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error generating completion report: $e');
       if (mounted) {
         // Close loading dialog if still open
@@ -436,7 +468,7 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error generating completion report for cycle: $e');
       if (mounted) {
         // Close loading dialog if still open
@@ -807,7 +839,9 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
                         final completedBy = completion['completedByName'] as String? ?? 'Unknown';
                         final completedById = completion['completedBy'] as String?;
                         final notes = completion['notes'] as String?;
-                        final duration = completion['durationMinutes'] as int?;
+                        final durationMinutes = completion['durationMinutes'] as int?;
+                        final durationSeconds = completion['durationSeconds'] as int? ??
+                            (durationMinutes != null ? durationMinutes * 60 : null);
                         final laborCost = completion['laborCost'] as double?;
                         final partsCost = completion['partsCost'] as double?;
                         final totalCost = completion['totalCost'] as double?;
@@ -824,8 +858,8 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
                         
                         // Get startedAt from PM task (since it's cleared after completion)
                         // We'll need to calculate it from completedAt and duration
-                        final startedAt = completedAt != null && duration != null
-                            ? completedAt.subtract(Duration(minutes: duration))
+                        final startedAt = completedAt != null && durationSeconds != null
+                            ? completedAt.subtract(Duration(seconds: durationSeconds))
                             : _currentPMTask.startedAt;
                         
                         return _buildCompletionHistoryItem(
@@ -833,7 +867,7 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
                           completedBy: completedBy,
                           completedById: completedById,
                           notes: notes,
-                          duration: duration,
+                          duration: durationSeconds,
                           laborCost: laborCost,
                           partsCost: partsCost,
                           totalCost: totalCost,
@@ -1110,14 +1144,8 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
   String _formatDate(DateTime date) =>
       '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
 
-  String _formatDuration(int minutes) {
-    final hours = minutes ~/ 60;
-    final mins = minutes % 60;
-    if (hours > 0) {
-      return '$hours hour${hours != 1 ? 's' : ''} ${mins} minute${mins != 1 ? 's' : ''}';
-    }
-    return '$mins minute${mins != 1 ? 's' : ''}';
-  }
+  String _formatDuration(int totalSeconds) =>
+      formatWorkDurationSeconds(totalSeconds);
 
   Widget _buildCompletionHistoryItem({
     required DateTime? completedAt,
@@ -1387,7 +1415,7 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
             );
           },
         );
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('Error decoding signature data URL: $e');
         return const Center(
           child: Icon(Icons.draw, color: Colors.grey),
@@ -1415,7 +1443,7 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
             );
           },
         );
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('Error parsing old signature format: $e');
         return const Center(
           child: Icon(Icons.draw, color: Colors.grey),
@@ -1444,7 +1472,7 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
             );
           },
         );
-      } catch (e) {
+      } catch (e, st) {
         // Not base64, try as network URL
         return Image.network(
           signatureData,
@@ -1518,7 +1546,7 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
         }
         return item.toString();
       }).toList();
-    } catch (e) {
+    } catch (e, st) {
       return [];
     }
   }
@@ -1577,18 +1605,20 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
             ),
           );
         }
-      } catch (e) {
+      } catch (e, st) {
         setState(() {
           _isLoading = false;
         });
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error updating PM task: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not update PM task. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PmTaskDetail: update PM task',
+          backgroundColor: AppTheme.errorColor,
+        );
         }
       }
     }
@@ -1645,18 +1675,20 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
             ),
           );
         }
-      } catch (e) {
+      } catch (e, st) {
         setState(() {
           _isLoading = false;
         });
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error deleting PM task: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not delete PM task. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PmTaskDetail: delete PM task',
+          backgroundColor: AppTheme.errorColor,
+        );
         }
       }
     }
@@ -1793,18 +1825,20 @@ class _PMTaskDetailScreenState extends State<PMTaskDetailScreen> {
             ),
           );
         }
-      } catch (e) {
+      } catch (e, st) {
         setState(() {
           _isLoading = false;
         });
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error reassigning technician: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not reassign technician. Please try again.',
+          stackTrace: st,
+          contextLabel: 'pm_task_detail_screen: Could not reassign technician.',
+          backgroundColor: AppTheme.errorColor,
+        );
         }
       }
     }
@@ -1871,7 +1905,7 @@ class _ReassignTechnicianDialogState extends State<_ReassignTechnicianDialog> {
         _technicians = technicians;
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _isLoading = false;
       });

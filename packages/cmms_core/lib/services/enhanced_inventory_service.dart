@@ -9,6 +9,7 @@ import '../models/user_role.dart';
 import 'enhanced_notification_service.dart';
 import 'supabase_database_service.dart';
 import 'unified_data_service.dart';
+import '../config/locator.dart';
 
 enum InventoryRequestStatus {
   pending,
@@ -101,16 +102,12 @@ class Vendor {
 }
 
 class EnhancedInventoryService {
-  factory EnhancedInventoryService() => _instance;
-  EnhancedInventoryService._internal();
-  static final EnhancedInventoryService _instance =
-      EnhancedInventoryService._internal();
 
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
   final EnhancedNotificationService _notificationService =
-      EnhancedNotificationService();
+      sl<EnhancedNotificationService>();
   final SupabaseDatabaseService _firestoreService =
-      SupabaseDatabaseService.instance;
+      sl<SupabaseDatabaseService>();
 
   final List<InventoryRequest> _requests = [];
   final List<Vendor> _vendors = [];
@@ -139,13 +136,13 @@ class EnhancedInventoryService {
         print(
           'EnhancedInventoryService: Loaded ${_vendors.length} vendors from Supabase',
         );
-      } catch (e) {
+      } catch (e, st) {
         print(
           'EnhancedInventoryService: Supabase unavailable, loading default vendors: $e',
         );
         await _loadDefaultVendors();
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint(
         'EnhancedInventoryService: Error loading inventory data: $e',
       );
@@ -577,7 +574,7 @@ class EnhancedInventoryService {
   Vendor? getVendorById(String vendorId) {
     try {
       return _vendors.firstWhere((v) => v.id == vendorId);
-    } catch (e) {
+    } catch (e, st) {
       return null;
     }
   }
@@ -590,7 +587,7 @@ class EnhancedInventoryService {
     try {
       await _firestoreService.saveVendor(vendor);
       debugPrint('EnhancedInventoryService: Vendor saved to Supabase');
-    } catch (e) {
+    } catch (e, st) {
       debugPrint(
         'EnhancedInventoryService: Failed to save vendor to Supabase: $e',
       );
@@ -609,7 +606,7 @@ class EnhancedInventoryService {
       try {
         await _firestoreService.saveVendor(vendor);
         debugPrint('EnhancedInventoryService: Vendor updated in Supabase');
-      } catch (e) {
+      } catch (e, st) {
         debugPrint(
           'EnhancedInventoryService: Failed to update vendor in Supabase: $e',
         );

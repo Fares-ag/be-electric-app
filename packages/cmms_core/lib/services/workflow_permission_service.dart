@@ -9,10 +9,6 @@ enum RequiredRole { admin, manager, technician, requestor, any }
 
 /// Service for managing workflow permissions and role-based access control
 class WorkflowPermissionService {
-  factory WorkflowPermissionService() => _instance;
-  WorkflowPermissionService._internal();
-  static final WorkflowPermissionService _instance =
-      WorkflowPermissionService._internal();
 
   /// Check if user can create a specific workflow type
   bool canCreateWorkflow(User user, WorkflowType type) {

@@ -10,6 +10,7 @@ import '../../theme/unified_design_system.dart';
 import '../../utils/app_theme.dart';
 import '../../widgets/professional_asset_display_widget.dart';
 import '../../widgets/professional_asset_selection_widget.dart';
+import '../../config/locator.dart';
 
 class EnhancedAssetDemoScreen extends StatefulWidget {
   const EnhancedAssetDemoScreen({super.key});
@@ -20,7 +21,7 @@ class EnhancedAssetDemoScreen extends StatefulWidget {
 }
 
 class _EnhancedAssetDemoScreenState extends State<EnhancedAssetDemoScreen> {
-  final HybridDamService _hybridService = HybridDamService();
+  final HybridDamService _hybridService = sl<HybridDamService>();
   List<Asset> _assets = [];
   bool _isLoading = false;
   Asset? _selectedAsset;

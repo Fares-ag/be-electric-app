@@ -156,6 +156,17 @@ class AppConfig {
   static bool get autoCreateUsersOnLogin =>
       const bool.fromEnvironment('AUTO_CREATE_USERS_ON_LOGIN', defaultValue: false);
 
+  /// Option A PM schedules + occurrences (technician inbox + requestor read-only).
+  ///
+  /// **Default: OFF** — legacy `pm_tasks` only; requestor PM module hidden.
+  /// **ON:** unified [PmInboxProvider] merges legacy + occurrences; requestor
+  /// PM dashboard enabled; occurrence completion is the new write path.
+  ///
+  /// Production: set in `scripts/defines.production.json` before store release.
+  /// Set via: flutter run --dart-define=ENABLE_PM_OCCURRENCES=true
+  static bool get enablePmOccurrences =>
+      const bool.fromEnvironment('ENABLE_PM_OCCURRENCES');
+
   /// Demo user credentials (only available in demo mode)
   static Map<String, Map<String, String>> get demoUsers {
     if (!isDemoMode) return {}; // Return empty map in production

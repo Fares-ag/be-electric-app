@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/release_safety.dart';
+
 /// Utility class to reset/clear all database data
 class DatabaseResetUtility {
   /// Clear all local data from SharedPreferences
@@ -51,6 +53,10 @@ class DatabaseResetUtility {
 
   /// Clear all data (both local and optionally Firestore)
   static Future<void> clearAllData({bool includeFirestore = false}) async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) {
+      throw StateError('Database reset is disabled in release builds');
+    }
+
     try {
       // Clear local database
       await clearLocalDatabase();
@@ -71,8 +77,10 @@ class DatabaseResetUtility {
   static Future<void> showResetConfirmationDialog(
     BuildContext context, {
     bool includeFirestore = false,
-  }) async =>
-      showDialog(
+  }) async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) return;
+
+    return showDialog(
         context: context,
         builder: (BuildContext context) => AlertDialog(
           title: const Row(
@@ -189,4 +197,5 @@ class DatabaseResetUtility {
           ],
         ),
       );
+  }
 }

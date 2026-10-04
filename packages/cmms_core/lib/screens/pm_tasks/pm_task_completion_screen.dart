@@ -1,17 +1,24 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/app_config.dart';
+import '../../config/locator.dart';
 import '../../models/activity_log.dart';
 import '../../models/pm_task.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
 import '../../services/activity_log_service.dart';
-import '../../services/supabase_storage_service.dart';
+import '../../services/connectivity_service.dart';
+import '../../services/offline_queue_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/offline_network.dart';
+import '../../utils/offline_service_access.dart';
+import '../../utils/user_facing_errors.dart';
 import '../../widgets/signature_widget.dart';
 
 class PMTaskCompletionScreen extends StatefulWidget {
@@ -28,7 +35,7 @@ class PMTaskCompletionScreen extends StatefulWidget {
 class _PMTaskCompletionScreenState extends State<PMTaskCompletionScreen> {
   final _formKey = GlobalKey<FormState>();
   final _notesController = TextEditingController();
-  final ActivityLogService _activityLogService = ActivityLogService();
+  final ActivityLogService _activityLogService = sl<ActivityLogService>();
 
   List<ChecklistItem> _checklistItems = [];
   String? _technicianSignature;
@@ -144,7 +151,7 @@ class _PMTaskCompletionScreenState extends State<PMTaskCompletionScreen> {
             text: item.toString(),
           );
         }).toList();
-      } catch (e) {
+      } catch (e, st) {
         _checklistItems = _defaultChecklistItems();
       }
     } else {
@@ -246,6 +253,18 @@ class _PMTaskCompletionScreenState extends State<PMTaskCompletionScreen> {
       ),
     );
 
+  PMTask _stripPendingPhotoFromHistory(PMTask pmTask) {
+    final history = pmTask.completionHistory;
+    if (history == null || history.isEmpty) return pmTask;
+
+    final patched = List<Map<String, dynamic>>.from(history);
+    final last = Map<String, dynamic>.from(patched.last);
+    last.remove('completionPhotoPath');
+    last['photoPendingSync'] = true;
+    patched[patched.length - 1] = last;
+    return pmTask.copyWith(completionHistory: patched, isOffline: true);
+  }
+
   Future<void> _completeTask() async {
     // Prevent double submission
     if (_isLoading) {
@@ -306,32 +325,41 @@ class _PMTaskCompletionScreenState extends State<PMTaskCompletionScreen> {
         return map;
       }).toList();
 
-      // Upload completion photo if any
+      // Upload completion photo when online; defer to atomic offline queue otherwise.
       String? completionPhotoUrl;
-      if (_completionPhotoPath != null) {
-        try {
-        final storageService = SupabaseStorageService();
-        await storageService.loadConfiguration();
+      String? pendingLocalPhotoPath;
 
-          // Convert path to XFile for web compatibility
-          final xFile = XFile(_completionPhotoPath!);
-          debugPrint('📸 Uploading PM task completion photo for task ${widget.pmTask.id}');
-          debugPrint('   ✅ Photo file path: ${xFile.path}');
-          
-          completionPhotoUrl = await storageService.uploadPMTaskCompletionPhoto(
-            photoFile: xFile,
-            pmTaskId: widget.pmTask.id,
-          );
+      if (_completionPhotoPath != null) {
+        final offlineMode = AppConfig.isOfflineModeEnabled;
+        final isOnline = sl<ConnectivityService>().isOnline;
+
+        if (offlineMode && !isOnline) {
+          pendingLocalPhotoPath = _completionPhotoPath;
+        } else {
+          try {
+            final workOrderRepository = CmmsRepositories.workOrders;
+            final xFile = XFile(_completionPhotoPath!);
+            debugPrint(
+              '📸 Uploading PM task completion photo for task ${widget.pmTask.id}',
+            );
+
+            completionPhotoUrl =
+                await workOrderRepository.uploadPMTaskCompletionPhoto(
+              photoFile: xFile,
+              pmTaskId: widget.pmTask.id,
+            );
 
             if (completionPhotoUrl != null) {
-              debugPrint('✅ PM task completion photo uploaded successfully: $completionPhotoUrl');
-            } else {
-              debugPrint('⚠️ PM task completion photo upload returned null URL');
-              // Don't fallback to local path - upload must succeed
+              debugPrint(
+                '✅ PM task completion photo uploaded: $completionPhotoUrl',
+              );
             }
-        } catch (e) {
-          debugPrint('❌ Error uploading PM task completion photo: $e');
-          // Don't fallback to local path - upload must succeed for cross-device access
+          } catch (e, st) {
+            debugPrint('❌ Error uploading PM task completion photo: $e');
+            if (offlineMode && isLikelyNetworkError(e)) {
+              pendingLocalPhotoPath = _completionPhotoPath;
+            }
+          }
         }
       }
       final completionTime = DateTime.now();
@@ -366,7 +394,8 @@ class _PMTaskCompletionScreenState extends State<PMTaskCompletionScreen> {
         'laborCost': widget.pmTask.laborCost,
         'partsCost': widget.pmTask.partsCost,
         'totalCost': widget.pmTask.totalCost,
-        'completionPhotoPath': completionPhotoUrl, // Use uploaded URL instead of local path
+        'completionPhotoPath': completionPhotoUrl ?? pendingLocalPhotoPath,
+        'photoPendingSync': pendingLocalPhotoPath != null,
       };
 
       // Add to completion history
@@ -395,14 +424,43 @@ class _PMTaskCompletionScreenState extends State<PMTaskCompletionScreen> {
         totalCost: null,
         startedAt: null, // Clear start time
         completionHistory: updatedHistory, // Add to history
+        isOffline: pendingLocalPhotoPath != null,
       );
 
-      final result = await unifiedProvider.updatePMTask(updatedPMTask);
-      
-      // Debug: Verify the update was successful
-      debugPrint('✅ PMTaskCompletion: PM task updated successfully: ${result.id}');
-      debugPrint('   Status: ${result.status}');
-      debugPrint('   Completion history count: ${result.completionHistory?.length ?? 0}');
+      final offlineMode = AppConfig.isOfflineModeEnabled;
+      final isOnline = sl<ConnectivityService>().isOnline;
+      final useAtomicOfflineQueue =
+          pendingLocalPhotoPath != null || (offlineMode && !isOnline);
+
+      if (useAtomicOfflineQueue) {
+        final pmForQueue = pendingLocalPhotoPath != null
+            ? _stripPendingPhotoFromHistory(updatedPMTask)
+            : updatedPMTask;
+
+        final queueData = <String, dynamic>{
+          'pmTask': pmForQueue.toMap(),
+        };
+        if (pendingLocalPhotoPath != null) {
+          queueData['pendingPhotoFilePath'] = pendingLocalPhotoPath;
+          queueData['pendingPhotoFileName'] =
+              'pm_task_completion_${widget.pmTask.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        }
+
+        await resolveOfflineQueueService().enqueue(
+          QueuedOperation(
+            id: 'complete_${updatedPMTask.id}',
+            type: OperationType.completePMTask,
+            data: queueData,
+            createdAt: DateTime.now(),
+          ),
+        );
+
+        await unifiedProvider.applyLocalPMTaskUpdate(updatedPMTask);
+        debugPrint('✅ PM task completion queued atomically for sync');
+      } else {
+        await unifiedProvider.updatePMTask(updatedPMTask);
+        debugPrint('✅ PM task updated online');
+      }
 
       // Log activity with completion cycle number
       if (mounted && authProvider.currentUser != null) {
@@ -430,20 +488,28 @@ class _PMTaskCompletionScreenState extends State<PMTaskCompletionScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('PM task completed successfully'),
+          SnackBar(
+            content: Text(
+              useAtomicOfflineQueue
+                  ? (pendingLocalPhotoPath != null
+                      ? 'PM task completed — photo and changes pending sync'
+                      : 'PM task completed locally — pending sync when online')
+                  : 'PM task completed successfully',
+            ),
             backgroundColor: AppTheme.successColor,
           ),
         );
         Navigator.pop(context, true);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error completing PM task: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not complete PM task. Please try again.',
+          stackTrace: st,
+          contextLabel: 'PmTaskCompletion: complete PM task',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {

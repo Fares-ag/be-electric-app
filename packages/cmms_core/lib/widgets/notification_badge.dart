@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../config/locator.dart';
 import '../services/notification_service.dart' as notification_service;
 import '../utils/app_theme.dart';
 
@@ -12,10 +13,14 @@ class NotificationBadge extends StatelessWidget {
   final String? userId;
   final Widget child;
 
+  notification_service.NotificationService get _notificationService =>
+      sl<notification_service.NotificationService>();
+
   @override
   Widget build(BuildContext context) =>
       StreamBuilder<List<notification_service.Notification>>(
-        stream: notification_service.NotificationService().notificationsStream,
+        stream: _notificationService.notificationsStream,
+        initialData: _notificationService.notifications,
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return child;

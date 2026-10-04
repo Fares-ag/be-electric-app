@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../services/hybrid_dam_service.dart';
 import '../../utils/app_theme.dart';
+import '../../config/locator.dart';
 
 class LegacyModeScreen extends StatefulWidget {
   const LegacyModeScreen({super.key});
@@ -45,7 +46,7 @@ class _LegacyModeScreenState extends State<LegacyModeScreen> {
 
       if (value) {
         // Configure legacy mode
-        final legacyService = HybridDamService();
+        final legacyService = sl<HybridDamService>();
         await legacyService.initialize();
       }
     } catch (e) {
@@ -61,7 +62,7 @@ class _LegacyModeScreenState extends State<LegacyModeScreen> {
 
     try {
       if (_isLegacyMode) {
-        final legacyService = HybridDamService();
+        final legacyService = sl<HybridDamService>();
         await legacyService.initialize();
         const result =
             true; // Hybrid DAM Service always initializes successfully
@@ -71,9 +72,8 @@ class _LegacyModeScreenState extends State<LegacyModeScreen> {
               : '❌ Legacy mode: Connection failed';
         });
       } else {
-        final firestoreService = SupabaseDatabaseService.instance;
-        await firestoreService.loadConfiguration();
-        final result = await firestoreService.testConnection();
+        await CmmsRepositories.workOrders.initialize();
+        final result = await CmmsRepositories.workOrders.testConnection();
         setState(() {
           _testResult = result
               ? '✅ New mode: Connection successful!'

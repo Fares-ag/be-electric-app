@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../screens/assets/asset_detail_screen.dart';
-import '../services/supabase_database_service.dart';
+import '../repositories/cmms_repositories.dart';
+import '../utils/user_facing_errors.dart';
 
 class QRScannerWidget extends StatefulWidget {
   const QRScannerWidget({super.key});
@@ -22,7 +23,7 @@ class _QRScannerWidgetState extends State<QRScannerWidget> {
   Future<void> _processQRCode(String qrCode) async {
     try {
       // Look for asset by QR code
-      final asset = await SupabaseDatabaseService.instance.getAssetByQRCode(qrCode);
+      final asset = await CmmsRepositories.assets.getAssetByQRCode(qrCode);
 
       if (asset != null && mounted) {
         // Navigate to asset details screen
@@ -38,9 +39,17 @@ class _QRScannerWidgetState extends State<QRScannerWidget> {
           'No asset found with QR code: $qrCode',
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        _showErrorDialog('Error', 'Failed to process QR code: $e');
+        _showErrorDialog(
+          'Error',
+          userFacingErrorMessage(
+            e,
+            genericMessage: 'Could not process QR code. Please try again.',
+            stackTrace: st,
+            contextLabel: 'QRScannerWidget: process QR',
+          ),
+        );
       }
     }
   }

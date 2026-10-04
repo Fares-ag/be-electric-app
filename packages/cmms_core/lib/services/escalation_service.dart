@@ -10,6 +10,7 @@ import '../models/work_order.dart';
 import 'enhanced_notification_service.dart';
 import 'supabase_database_service.dart';
 import 'unified_data_service.dart';
+import '../config/locator.dart';
 
 enum EscalationLevel {
   none,
@@ -78,17 +79,14 @@ class EscalationEvent {
 }
 
 class EscalationService {
-  factory EscalationService() => _instance;
-  EscalationService._internal();
-  static final EscalationService _instance = EscalationService._internal();
 
   final List<EscalationRule> _rules = [];
   final List<EscalationEvent> _events = [];
   final EnhancedNotificationService _notificationService =
-      EnhancedNotificationService();
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+      sl<EnhancedNotificationService>();
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
   final SupabaseDatabaseService _firestoreService =
-      SupabaseDatabaseService.instance;
+      sl<SupabaseDatabaseService>();
 
   Timer? _escalationTimer;
   bool _isInitialized = false;
@@ -204,13 +202,13 @@ class EscalationService {
         debugPrint(
           '✅ EscalationService: Loaded ${_events.length} events from Firestore',
         );
-      } catch (e) {
+      } catch (e, st) {
         debugPrint(
           '⚠️ EscalationService: Firestore unavailable, using memory storage: $e',
         );
         // Events remain in memory for this session
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ EscalationService: Error loading escalation events: $e');
     }
   }
@@ -230,7 +228,7 @@ class EscalationService {
       await _checkPMTaskEscalations();
       await _checkBudgetEscalations();
       await _checkSystemHealthEscalations();
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ EscalationService: Error checking escalations: $e');
     }
   }
@@ -421,7 +419,7 @@ class EscalationService {
         return healthScore < threshold;
       }
       return false;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ EscalationService: Error evaluating condition: $e');
       return false;
     }
@@ -451,7 +449,7 @@ class EscalationService {
     try {
       await _firestoreService.saveEscalationEvent(event);
       debugPrint('✅ EscalationService: Event saved to Firestore');
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('⚠️ EscalationService: Failed to save to Firestore: $e');
     }
 

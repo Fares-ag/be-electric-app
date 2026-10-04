@@ -6,6 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/advanced_reporting_service.dart' as advanced;
 import '../../utils/app_theme.dart';
+import '../../config/locator.dart';
+import '../../utils/user_facing_errors.dart';
 
 class ReportingScreen extends StatefulWidget {
   const ReportingScreen({super.key});
@@ -16,7 +18,7 @@ class ReportingScreen extends StatefulWidget {
 
 class _ReportingScreenState extends State<ReportingScreen> {
   final advanced.AdvancedReportingService _advancedReporting =
-      advanced.AdvancedReportingService();
+      sl<advanced.AdvancedReportingService>();
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -633,13 +635,15 @@ class _ReportingScreenState extends State<ReportingScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error generating report: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not generate report. Please try again.',
+          stackTrace: st,
+          contextLabel: 'Reporting: generate report',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     }

@@ -1,55 +1,74 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/auth_provider.dart';
 import 'cmms_app_mode_scope.dart';
 import '../config/cmms_app_mode.dart';
-import '../providers/auth_provider.dart';
-import '../providers/inventory_provider.dart';
-import '../providers/unified_data_provider.dart';
+import '../providers/cmms_provider_bundle.dart';
 import '../screens/analytics/consolidated_analytics_dashboard.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/requestor/create_maintenance_request_screen.dart';
 import '../screens/requestor/requestor_splash_screen.dart';
 import '../utils/app_theme.dart';
+import '../theme/design_tokens.dart';
 import '../widgets/role_based_navigation.dart';
 
-class BeElectricApp extends StatelessWidget {
+class BeElectricApp extends StatefulWidget {
   const BeElectricApp({super.key, required this.appMode});
 
   final CmmsAppMode appMode;
 
   @override
+  State<BeElectricApp> createState() => _BeElectricAppState();
+}
+
+class _BeElectricAppState extends State<BeElectricApp> {
+  late final CmmsProviderBundle _providerBundle;
+
+  @override
+  void initState() {
+    super.initState();
+    _providerBundle = CmmsProviderBundle();
+  }
+
+  @override
+  void dispose() {
+    _providerBundle.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final title = switch (appMode) {
+    final title = switch (widget.appMode) {
       CmmsAppMode.requestor => 'Be Electric — Requestor',
       CmmsAppMode.technician => 'Be Electric — Technician',
     };
 
     return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => UnifiedDataProvider()),
-        ChangeNotifierProvider(create: (_) => InventoryProvider()),
-      ],
+      providers: _providerBundle.providers,
       child: CmmsAppModeScope(
-        appMode: appMode,
+        appMode: widget.appMode,
         child: MaterialApp(
           title: title,
           theme: AppTheme.lightTheme,
+          builder: (context, child) => DefaultTextStyle.merge(
+            style: const TextStyle(fontFamily: DesignTokens.fontFamily),
+            child: child ?? const SizedBox.shrink(),
+          ),
           home: const AuthWrapper(),
           debugShowCheckedModeBanner: false,
           routes: {
-          '/create_maintenance_request': (context) {
-            final args = ModalRoute.of(context)!.settings.arguments!
-                as Map<String, dynamic>;
-            return CreateMaintenanceRequestScreen(
-              asset: args['asset'],
-              qrCode: args['qrCode'],
-            );
+            '/create_maintenance_request': (context) {
+              final args = ModalRoute.of(context)!.settings.arguments!
+                  as Map<String, dynamic>;
+              return CreateMaintenanceRequestScreen(
+                asset: args['asset'],
+                qrCode: args['qrCode'],
+              );
+            },
+            '/analytics_dashboard': (context) =>
+                const ConsolidatedAnalyticsDashboard(),
           },
-          '/analytics_dashboard': (context) =>
-              const ConsolidatedAnalyticsDashboard(),
-        },
         ),
       ),
     );
@@ -84,7 +103,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
         _authProvider?.addListener(_onAuthChanged);
         _listenerAdded = true;
         debugPrint('🔧 AuthWrapper: Listener added to AuthProvider');
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('⚠️ AuthWrapper: Error adding listener: $e');
       }
     }
@@ -105,7 +124,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       try {
         _authProvider!.removeListener(_onAuthChanged);
         debugPrint('🔧 AuthWrapper: Listener removed from AuthProvider');
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('⚠️ AuthWrapper: Error removing listener: $e');
       }
     }
@@ -128,7 +147,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       await authProvider.checkAuthStatus();
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error checking auth status: $e');
     }
   }

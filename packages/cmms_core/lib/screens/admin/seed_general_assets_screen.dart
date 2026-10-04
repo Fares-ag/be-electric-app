@@ -3,7 +3,9 @@
 import 'package:flutter/material.dart';
 import '../../models/asset.dart';
 import '../../utils/app_theme.dart';
+import '../../config/release_safety.dart';
 import '../../utils/seed_general_maintenance_assets.dart';
+import '../../utils/user_facing_errors.dart';
 
 class SeedGeneralAssetsScreen extends StatefulWidget {
   const SeedGeneralAssetsScreen({super.key});
@@ -43,7 +45,7 @@ class _SeedGeneralAssetsScreenState extends State<SeedGeneralAssetsScreen> {
         _existingCount = count;
         _isChecking = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _isChecking = false;
         _errorMessage = 'Error checking assets: $e';
@@ -77,19 +79,21 @@ class _SeedGeneralAssetsScreenState extends State<SeedGeneralAssetsScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _isSeeding = false;
         _errorMessage = 'Error seeding assets: $e';
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('âŒ Error: $e'),
-            backgroundColor: AppTheme.errorColor,
-            duration: const Duration(seconds: 5),
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not seed assets. Please try again.',
+          stackTrace: st,
+          contextLabel: 'SeedGeneralAssets: seed assets',
+          backgroundColor: AppTheme.errorColor,
+          duration: const Duration(seconds: 5),
         );
       }
     }
@@ -147,7 +151,7 @@ class _SeedGeneralAssetsScreenState extends State<SeedGeneralAssetsScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _isSeeding = false;
         _errorMessage = 'Error deleting assets: $e';
@@ -156,7 +160,25 @@ class _SeedGeneralAssetsScreenState extends State<SeedGeneralAssetsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    if (!ReleaseSafety.allowDataSeeding) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('General Maintenance Assets Setup'),
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'This setup tool is not available in production builds.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
         appBar: AppBar(
           title: const Text('General Maintenance Assets Setup'),
           elevation: 2,
@@ -413,4 +435,5 @@ class _SeedGeneralAssetsScreenState extends State<SeedGeneralAssetsScreen> {
                 ),
               ),
       );
+  }
 }

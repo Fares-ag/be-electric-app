@@ -12,6 +12,7 @@ import '../../services/enhanced_notification_service.dart';
 import '../../services/escalation_service.dart';
 import '../../services/workflow_automation_service.dart';
 import '../../utils/app_theme.dart';
+import '../../config/locator.dart';
 // Removed unused model imports
 
 class ComprehensiveDashboardScreen extends StatefulWidget {
@@ -25,15 +26,15 @@ class ComprehensiveDashboardScreen extends StatefulWidget {
 class _ComprehensiveDashboardScreenState
     extends State<ComprehensiveDashboardScreen> with TickerProviderStateMixin {
   late TabController _tabController;
-  final ComprehensiveCMMSService _cmmsService = ComprehensiveCMMSService();
+  final ComprehensiveCMMSService _cmmsService = sl<ComprehensiveCMMSService>();
   final EnhancedNotificationService _notificationService =
-      EnhancedNotificationService();
-  final EscalationService _escalationService = EscalationService();
-  final AdvancedReportingService _reportingService = AdvancedReportingService();
-  final EnhancedInventoryService _inventoryService = EnhancedInventoryService();
+      sl<EnhancedNotificationService>();
+  final EscalationService _escalationService = sl<EscalationService>();
+  final AdvancedReportingService _reportingService = sl<AdvancedReportingService>();
+  final EnhancedInventoryService _inventoryService = sl<EnhancedInventoryService>();
   final WorkflowAutomationService _automationService =
-      WorkflowAutomationService();
-  final AuditLoggingService _auditService = AuditLoggingService();
+      sl<WorkflowAutomationService>();
+  final AuditLoggingService _auditService = sl<AuditLoggingService>();
 
   Map<String, dynamic>? _systemStats;
   Map<String, dynamic>? _serviceHealth;
@@ -58,7 +59,7 @@ class _ComprehensiveDashboardScreenState
     try {
       _systemStats = _cmmsService.getSystemStatistics();
       _serviceHealth = _cmmsService.getServiceHealth();
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading dashboard data: $e');
     }
 

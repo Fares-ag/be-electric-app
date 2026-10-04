@@ -8,6 +8,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/workflow_provider.dart';
 import '../../utils/app_theme.dart';
 import 'workflow_approval_screen.dart';
+import '../../utils/user_facing_errors.dart';
 
 // Extension to add grey to AppTheme
 extension AppThemeColors on AppTheme {
@@ -753,14 +754,16 @@ class _WorkflowDetailScreenState extends State<WorkflowDetailScreen> {
           );
           Navigator.pop(context);
         }
-      } catch (e) {
+      } catch (e, st) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error cancelling workflow: $e'),
-              backgroundColor: AppTheme.red,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not cancel workflow. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkflowDetail: cancel',
+          backgroundColor: AppTheme.red,
+        );
         }
       }
     }
@@ -810,14 +813,16 @@ class _WorkflowDetailScreenState extends State<WorkflowDetailScreen> {
             ),
           );
         }
-      } catch (e) {
+      } catch (e, st) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error escalating workflow: $e'),
-              backgroundColor: AppTheme.red,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not escalate workflow. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkflowDetail: escalate',
+          backgroundColor: AppTheme.red,
+        );
         }
       }
     }

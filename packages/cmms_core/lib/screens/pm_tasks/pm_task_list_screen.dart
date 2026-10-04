@@ -9,6 +9,10 @@ import '../../utils/responsive_layout.dart';
 import 'create_pm_task_screen.dart';
 import 'pm_task_card_widget.dart';
 
+/// Admin/manager legacy PM task list (`pm_tasks` table).
+///
+/// **Freeze policy:** maintenance-only. Technicians use [PmTechnicianInboxScreen]
+/// (unified [PmWorkItem] inbox). Do not extend this screen for Option A features.
 class PMTaskListScreen extends StatefulWidget {
   const PMTaskListScreen({
     super.key,
@@ -40,16 +44,7 @@ class _PMTaskListScreenState extends State<PMTaskListScreen> {
   @override
   void initState() {
     super.initState();
-    // Initialize filters from deep-link parameters
     _selectedStatusFilter = widget.initialStatusFilter;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadPMTasks();
-    });
-  }
-
-  Future<void> _loadPMTasks() async {
-    // Data is now loaded from unified provider automatically
-    print('📋 PM Task List: Data loaded from unified provider');
   }
 
   @override
@@ -59,26 +54,10 @@ class _PMTaskListScreenState extends State<PMTaskListScreen> {
           // Get PM tasks based on user role and view mode
           List<PMTask> pmTasks;
 
-          print(
-            'ðŸ” PM Task List - User: ${authProvider.currentUser?.name}, Role: ${authProvider.currentUser?.role}, isTechnicianView: ${widget.isTechnicianView}',
-          );
-          print(
-            'ðŸ” Total PM tasks in provider: ${unifiedProvider.pmTasks.length}',
-          );
-
           if (widget.isTechnicianView) {
             // Technician view: show only assigned PM tasks
             final currentUserId = authProvider.currentUser!.id;
             pmTasks = unifiedProvider.getPMTasksByTechnician(currentUserId);
-            print(
-              'ðŸ” Technician view mode - showing tasks assigned to: $currentUserId',
-            );
-            print('ðŸ” Found ${pmTasks.length} assigned PM tasks');
-            for (final task in unifiedProvider.pmTasks) {
-              print(
-                '   - Task: ${task.taskName}, Assigned to: ${task.assignedTechnicianIds.isEmpty ? "unassigned" : task.assignedTechnicianIds.join(",")}',
-              );
-            }
           } else if (authProvider.currentUser?.role == 'requestor') {
             // Requestors typically don't see PM tasks, but show unassigned ones
             pmTasks = unifiedProvider.pmTasks
@@ -221,7 +200,6 @@ class _PMTaskListScreenState extends State<PMTaskListScreen> {
                         _showDueSoonOnly = false;
                       }
                     });
-                    print('📋 PM Task List: Filter by $value');
                   },
                   itemBuilder: (context) => [
                     PopupMenuItem(
@@ -285,7 +263,6 @@ class _PMTaskListScreenState extends State<PMTaskListScreen> {
                         _sortAscending = value == 'nextDueDate' || value == 'createdAt';
                       }
                     });
-                    print('📋 PM Task List: Sort by $value (${_sortAscending ? "asc" : "desc"})');
                   },
                   itemBuilder: (context) => [
                     PopupMenuItem(

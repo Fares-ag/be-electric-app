@@ -43,7 +43,7 @@ class DataQualityService {
       }
 
       return true;
-    } catch (e) {
+    } catch (e, st) {
       print(
           'âŒ Data Quality: Error validating work order ${workOrder.id}: $e',);
       return false;
@@ -100,7 +100,7 @@ class DataQualityService {
       }
 
       return true;
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Data Quality: Error validating asset ${asset.id}: $e');
       return false;
     }
@@ -143,7 +143,7 @@ class DataQualityService {
       }
 
       return true;
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Data Quality: Error validating PM task ${task.id}: $e');
       return false;
     }
@@ -279,7 +279,7 @@ class DataQualityService {
           freshnessBonus;
 
       return totalScore.clamp(0.0, 100.0);
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Data Quality: Error calculating quality score: $e');
       return 0.0;
     }

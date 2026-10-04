@@ -7,12 +7,18 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/release_safety.dart';
+
 
 class RemoveAllSampleData {
   static final SupabaseClient _supabase = Supabase.instance.client;
 
   /// Remove all sample data from the system
   static Future<Map<String, dynamic>> removeAllSampleData() async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) {
+      throw StateError('Sample data removal is disabled in release builds');
+    }
+
     try {
       debugPrint('🧹 Starting complete sample data removal...');
 
@@ -305,8 +311,10 @@ class RemoveAllSampleData {
   /// Show confirmation dialog
   static Future<void> showRemovalConfirmationDialog(
     BuildContext context,
-  ) async =>
-      showDialog(
+  ) async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) return;
+
+    return showDialog(
         context: context,
         builder: (BuildContext context) => AlertDialog(
           title: const Row(
@@ -422,4 +430,5 @@ class RemoveAllSampleData {
           ],
         ),
       );
+  }
 }

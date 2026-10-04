@@ -6,6 +6,7 @@ import '../../providers/unified_data_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/requestor_home_navigation.dart';
 import '../../utils/responsive_layout.dart';
+import '../../utils/work_order_duration.dart';
 import '../../widgets/custom_app_bar.dart';
 import '../../widgets/requestor_more_menu.dart';
 
@@ -432,23 +433,22 @@ class RequestorAnalyticsScreen extends StatelessWidget {
     // Calculate average resolution time
     final totalDays = completedOrders.fold<double>(
       0,
-      (sum, wo) {
-        final duration = wo.completedAt!.difference(wo.createdAt);
-        return sum + duration.inDays + (duration.inHours % 24) / 24;
-      },
+      (sum, wo) =>
+          sum +
+          elapsedDaysBetween(wo.createdAt, wo.completedAt!),
     );
     final avgDays = totalDays / completedOrders.length;
 
     // Find fastest and slowest
     final fastest = completedOrders.reduce((a, b) {
-      final aDuration = a.completedAt!.difference(a.createdAt);
-      final bDuration = b.completedAt!.difference(b.createdAt);
-      return aDuration < bDuration ? a : b;
+      final aSeconds = elapsedSecondsBetween(a.createdAt, a.completedAt!);
+      final bSeconds = elapsedSecondsBetween(b.createdAt, b.completedAt!);
+      return aSeconds <= bSeconds ? a : b;
     });
     final slowest = completedOrders.reduce((a, b) {
-      final aDuration = a.completedAt!.difference(a.createdAt);
-      final bDuration = b.completedAt!.difference(b.createdAt);
-      return aDuration > bDuration ? a : b;
+      final aSeconds = elapsedSecondsBetween(a.createdAt, a.completedAt!);
+      final bSeconds = elapsedSecondsBetween(b.createdAt, b.completedAt!);
+      return aSeconds >= bSeconds ? a : b;
     });
 
     return Card(
@@ -479,8 +479,11 @@ class RequestorAnalyticsScreen extends StatelessWidget {
             _buildMetricRow(
               context,
               'Fastest Resolution',
-              _formatDuration(
-                fastest.completedAt!.difference(fastest.createdAt),
+              formatWorkDurationSeconds(
+                elapsedSecondsBetween(
+                  fastest.createdAt,
+                  fastest.completedAt!,
+                ),
               ),
               Icons.flash_on,
               AppTheme.accentGreen,
@@ -488,8 +491,11 @@ class RequestorAnalyticsScreen extends StatelessWidget {
             _buildMetricRow(
               context,
               'Slowest Resolution',
-              _formatDuration(
-                slowest.completedAt!.difference(slowest.createdAt),
+              formatWorkDurationSeconds(
+                elapsedSecondsBetween(
+                  slowest.createdAt,
+                  slowest.completedAt!,
+                ),
               ),
               Icons.hourglass_empty,
               AppTheme.accentOrange,
@@ -766,16 +772,6 @@ class RequestorAnalyticsScreen extends StatelessWidget {
         return Icons.error_outline;
       case WorkOrderPriority.critical:
         return Icons.priority_high;
-    }
-  }
-
-  String _formatDuration(Duration duration) {
-    if (duration.inDays > 0) {
-      return '${duration.inDays} day${duration.inDays == 1 ? '' : 's'}';
-    } else if (duration.inHours > 0) {
-      return '${duration.inHours} hour${duration.inHours == 1 ? '' : 's'}';
-    } else {
-      return '${duration.inMinutes} minute${duration.inMinutes == 1 ? '' : 's'}';
     }
   }
 

@@ -3,9 +3,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
 import '../models/user.dart';
+import '../repositories/cmms_repositories.dart';
+import '../services/session_purge_service.dart';
 import '../services/supabase_auth_service.dart';
-import '../services/supabase_database_service.dart';
 import '../utils/auth_login_policy.dart';
+import '../config/locator.dart';
 
 class AuthProvider with ChangeNotifier {
   User? _currentUser;
@@ -27,11 +29,11 @@ class AuthProvider with ChangeNotifier {
 
     try {
       // Check Supabase authentication first
-      final supabaseAuthService = SupabaseAuthService.instance;
+      final supabaseAuthService = sl<SupabaseAuthService>();
       if (supabaseAuthService.isSignedIn) {
         final supabaseUser = await supabaseAuthService.getCurrentAppUser();
         if (supabaseUser != null) {
-          final dbUser = await SupabaseDatabaseService.instance
+          final dbUser = await CmmsRepositories.users
               .getUserByEmail(supabaseUser.email);
           if (isSessionAuthorized(hasDatabaseUser: dbUser != null)) {
             _currentUser = dbUser;
@@ -50,13 +52,13 @@ class AuthProvider with ChangeNotifier {
 
       // Fallback: restore from local prefs only in debug/demo builds.
       // Release builds require a valid Supabase Auth session (RLS-safe).
-      if (!kReleaseMode) {
+      if (shouldAllowLocalSessionRestore(isReleaseMode: kReleaseMode)) {
         final prefs = await SharedPreferences.getInstance();
         final userId = prefs.getString('current_user_id');
 
         if (userId != null) {
           final storedUser =
-              await SupabaseDatabaseService.instance.getUserById(userId);
+              await CmmsRepositories.users.getUserById(userId);
           if (storedUser != null) {
             _currentUser = storedUser;
             _isAuthenticated = true;
@@ -76,7 +78,7 @@ class AuthProvider with ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('current_user_id');
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error checking auth status: $e');
       // Set default state if there's an error
       _isAuthenticated = false;
@@ -99,7 +101,7 @@ class AuthProvider with ChangeNotifier {
 
       // Try Supabase authentication first
       try {
-        final supabaseAuthService = SupabaseAuthService.instance;
+        final supabaseAuthService = sl<SupabaseAuthService>();
         final supabaseUser =
             await supabaseAuthService.signInWithEmailAndPassword(
           email: email,
@@ -108,7 +110,7 @@ class AuthProvider with ChangeNotifier {
 
         if (supabaseUser != null) {
           // Get user from Supabase
-          var dbUser = await SupabaseDatabaseService.instance.getUserByEmail(email);
+          var dbUser = await CmmsRepositories.users.getUserByEmail(email);
 
           debugPrint('🔑 Login: Supabase UID: ${supabaseUser.id}');
           debugPrint('🔑 Login: Supabase User: ${dbUser?.name} (ID: ${dbUser?.id})');
@@ -129,9 +131,9 @@ class AuthProvider with ChangeNotifier {
             debugPrint('⚠️ User not found in Supabase, creating requestor row...');
             final newUser = supabaseUser.copyWith(role: kAutoCreatedUserRole);
             final readableId =
-                await SupabaseDatabaseService.instance.createUser(newUser);
+                await CmmsRepositories.users.createUser(newUser);
             dbUser =
-                await SupabaseDatabaseService.instance.getUserById(readableId);
+                await CmmsRepositories.users.getUserById(readableId);
             debugPrint(
               '✅ Created user in Supabase: ${dbUser?.name} (ID: ${dbUser?.id})',
             );
@@ -159,15 +161,16 @@ class AuthProvider with ChangeNotifier {
           notifyListeners();
           return true;
         }
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('Supabase authentication error: $e');
         // Continue to try demo users as fallback
       }
 
-      // Fallback to demo users for testing
-      if (_isDemoUser(email, password)) {
+      // Fallback to demo users for testing (demo mode only)
+      if (shouldAllowDemoUserFallback(isDemoMode: AppConfig.isDemoMode) &&
+          _isDemoUser(email, password)) {
         // FIRST: Try to load user from Supabase (they might have been updated)
-        final dbUser = await SupabaseDatabaseService.instance.getUserByEmail(email);
+        final dbUser = await CmmsRepositories.users.getUserByEmail(email);
 
         if (dbUser != null) {
           // User exists in Supabase - use their current role!
@@ -199,8 +202,12 @@ class AuthProvider with ChangeNotifier {
         return true;
       }
 
-      // Try to authenticate with database (skip on web)
-      if (!kIsWeb) {
+      // Debug-only passwordless DB lookup (never in release/profile builds).
+      if (shouldAllowDebugDatabaseAuth(
+            isReleaseMode: kReleaseMode,
+            isDebugMode: kDebugMode,
+          ) &&
+          !kIsWeb) {
         try {
           final user = await _authenticateWithDatabase(email, password);
           if (user != null) {
@@ -220,14 +227,14 @@ class AuthProvider with ChangeNotifier {
             notifyListeners();
             return true;
           }
-        } catch (e) {
+        } catch (e, st) {
           debugPrint('Database authentication error: $e');
           // Continue to return false if database auth fails
         }
       }
 
       return false;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Login error: $e');
       return false;
     } finally {
@@ -268,21 +275,21 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<User?> _authenticateWithDatabase(String email, String password) async {
-    // SECURITY: This fallback is disabled in release builds.
-    // All authentication must go through Supabase Auth.
-    if (const bool.fromEnvironment('dart.vm.product', defaultValue: false) ||
-        kReleaseMode) {
-      debugPrint('Database-only auth disabled in release mode');
+    if (!shouldAllowDebugDatabaseAuth(
+      isReleaseMode: kReleaseMode,
+      isDebugMode: kDebugMode,
+    )) {
+      debugPrint('Database-only auth disabled outside debug builds');
       return null;
     }
     try {
-      final users = await SupabaseDatabaseService.instance.getAllUsers();
+      final users = await CmmsRepositories.users.getAllUsers();
       final user = users.firstWhere(
         (u) => u.email.toLowerCase() == email.toLowerCase(),
         orElse: () => throw Exception('User not found'),
       );
       return user;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Supabase authentication error: $e');
       return null;
     }
@@ -292,17 +299,18 @@ class AuthProvider with ChangeNotifier {
     // Do not set [isLoading] or [isRestoringSession] here. AuthWrapper treats those
     // as "block entire app with a spinner", which makes logout look stuck if
     // sign-out is slow or hangs.
+    await SessionPurgeService.purgeOnSessionEnd();
     try {
-      await SupabaseAuthService.instance
+      await sl<SupabaseAuthService>()
           .signOut()
           .timeout(const Duration(seconds: 15));
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Supabase signOut: $e');
     }
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('current_user_id');
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Logout clear prefs: $e');
     }
     _currentUser = null;
@@ -322,8 +330,8 @@ class AuthProvider with ChangeNotifier {
   /// Get all users (for technician assignment)
   Future<List<User>> getAllUsers() async {
     try {
-      return await SupabaseDatabaseService.instance.getAllUsers();
-    } catch (e) {
+      return await CmmsRepositories.users.getAllUsers();
+    } catch (e, st) {
       debugPrint('Error getting all users: $e');
       return [];
     }

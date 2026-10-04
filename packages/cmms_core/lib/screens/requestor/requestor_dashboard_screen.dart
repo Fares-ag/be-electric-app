@@ -13,6 +13,7 @@ import '../auth/login_screen.dart';
 import '../pm_tasks/pm_task_detail_screen.dart';
 import '../work_orders/work_order_detail_screen.dart';
 import 'requestor_main_screen.dart';
+import '../../config/locator.dart';
 
 class RequestorDashboardScreen extends StatefulWidget {
   const RequestorDashboardScreen({super.key});
@@ -26,7 +27,7 @@ class _RequestorDashboardScreenState extends State<RequestorDashboardScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
   final EnhancedNotificationService _notificationService =
-      EnhancedNotificationService();
+      sl<EnhancedNotificationService>();
 
   final ScrollController _requestsScrollController = ScrollController();
   final ScrollController _historyScrollController = ScrollController();
@@ -71,8 +72,8 @@ class _RequestorDashboardScreenState extends State<RequestorDashboardScreen>
   }
 
   Future<void> _loadRequestorData() async {
-    final userId =
-        Provider.of<AuthProvider>(context, listen: false).currentUser?.id;
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final userId = auth.currentUser?.id;
     if (userId == null || userId.isEmpty) return;
     final unifiedProvider =
         Provider.of<UnifiedDataProvider>(context, listen: false);

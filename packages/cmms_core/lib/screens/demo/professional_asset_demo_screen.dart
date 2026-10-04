@@ -9,6 +9,7 @@ import '../../services/hybrid_dam_service.dart';
 import '../../theme/unified_design_system.dart';
 import '../../widgets/professional_asset_display_widget.dart';
 import '../../widgets/professional_asset_selection_widget.dart';
+import '../../config/locator.dart';
 
 class ProfessionalAssetDemoScreen extends StatefulWidget {
   const ProfessionalAssetDemoScreen({super.key});
@@ -20,7 +21,7 @@ class ProfessionalAssetDemoScreen extends StatefulWidget {
 
 class _ProfessionalAssetDemoScreenState
     extends State<ProfessionalAssetDemoScreen> {
-  final HybridDamService _hybridService = HybridDamService();
+  final HybridDamService _hybridService = sl<HybridDamService>();
   List<Asset> _assets = [];
   Asset? _selectedAsset;
   bool _isLoading = true;

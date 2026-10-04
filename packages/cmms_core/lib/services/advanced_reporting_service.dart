@@ -16,7 +16,9 @@ import '../models/inventory_item.dart';
 import '../models/pm_task.dart';
 import '../models/user.dart';
 import '../models/work_order.dart';
+import '../utils/work_order_duration.dart';
 import 'unified_data_service.dart';
+import '../config/locator.dart';
 
 enum ReportType {
   workOrderSummary,
@@ -100,12 +102,8 @@ class ReportData {
 }
 
 class AdvancedReportingService {
-  factory AdvancedReportingService() => _instance;
-  AdvancedReportingService._internal();
-  static final AdvancedReportingService _instance =
-      AdvancedReportingService._internal();
 
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
   final List<ReportData> _generatedReports = [];
 
   List<ReportData> get generatedReports => List.unmodifiable(_generatedReports);
@@ -158,7 +156,7 @@ class AdvancedReportingService {
 
       _generatedReports.add(finalReportData);
       return finalReportData;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ AdvancedReportingService: Error generating report: $e');
       rethrow;
     }
@@ -1123,7 +1121,7 @@ class AdvancedReportingService {
 
       debugPrint('✅ Successfully loaded image: $imagePath');
       return image;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ Error loading image: $imagePath - $e');
       return null; // Return null instead of throwing to prevent PDF failure
     }
@@ -1302,7 +1300,7 @@ class AdvancedReportingService {
   String _valueToString(dynamic value) {
     if (value == null) return '';
     if (value is DateTime) return value.toIso8601String();
-    if (value is Duration) return '${value.inHours}h ${value.inMinutes % 60}m';
+    if (value is Duration) return formatWorkDuration(value);
     if (value is Enum) return value.name;
     if (value is List) return value.map(_valueToString).join('; ');
     if (value is Map) {

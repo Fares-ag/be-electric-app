@@ -6,10 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'asset_integration_service.dart';
 
 class AssetChangeDetectionService {
-  factory AssetChangeDetectionService() => _instance;
-  AssetChangeDetectionService._internal();
-  static final AssetChangeDetectionService _instance =
-      AssetChangeDetectionService._internal();
 
   static SharedPreferences? _prefs;
   static const String _lastAssetHashKey = 'last_asset_hash';
@@ -60,7 +56,7 @@ class AssetChangeDetectionService {
       }
 
       return hasChanges;
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸ” Error checking for changes: $e');
       // On error, assume no changes to avoid unnecessary syncs
       return false;
@@ -112,7 +108,7 @@ class AssetChangeDetectionService {
         'sample_size': sampleAssets.length,
         'is_sample': true,
       };
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸ” Error getting current metadata: $e');
       return null;
     }
@@ -140,7 +136,7 @@ class AssetChangeDetectionService {
           'is_sample': false,
         };
       }
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸ” Metadata endpoint not available: $e');
     }
     return null;
@@ -163,7 +159,7 @@ class AssetChangeDetectionService {
         'hash': hash,
         'timestamp': timestamp,
       };
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸ” Error getting last known metadata: $e');
       return null;
     }
@@ -182,7 +178,7 @@ class AssetChangeDetectionService {
       print(
         'ðŸ” Saved current metadata: ${metadata['count']} assets, hash: ${metadata['hash']}',
       );
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸ” Error saving metadata: $e');
     }
   }
@@ -239,7 +235,7 @@ class AssetChangeDetectionService {
       }
 
       return hasChanges;
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸ” Error in force check: $e');
       return false;
     }
@@ -259,7 +255,7 @@ class AssetChangeDetectionService {
             : true,
         'lastCheck': DateTime.now().toIso8601String(),
       };
-    } catch (e) {
+    } catch (e, st) {
       return {
         'error': e.toString(),
         'lastCheck': DateTime.now().toIso8601String(),
@@ -275,7 +271,7 @@ class AssetChangeDetectionService {
       await prefs.remove(_lastAssetCountKey);
       await prefs.remove(_lastAssetTimestampKey);
       print('ðŸ” Cleared change detection data');
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸ” Error clearing change detection data: $e');
     }
   }

@@ -1,17 +1,21 @@
-﻿// Duplicate Data Diagnostic - Visual summary of duplicate checks
+// Duplicate Data Diagnostic - Visual summary of duplicate checks
 
 import 'package:flutter/material.dart';
+import '../config/release_safety.dart';
 import '../services/unified_data_service.dart';
 import '../models/user.dart';
 import '../models/work_order.dart';
 import '../models/pm_task.dart';
 import '../models/asset.dart';
+import '../config/locator.dart';
 
 /// Diagnostic utility to analyze duplicate data
 class DuplicateDataDiagnostic {
   /// Show diagnostic dialog with comprehensive analysis
   static Future<void> showDiagnosticDialog(BuildContext context) async {
-    final service = UnifiedDataService.instance;
+    if (!ReleaseSafety.showDevTools) return;
+
+    final service = sl<UnifiedDataService>();
 
     // Collect all data
     final users = service.users;

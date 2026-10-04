@@ -8,6 +8,7 @@ import '../../models/workflow_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/workflow_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 // Extension to add grey to AppTheme
 extension AppThemeColors on AppTheme {
@@ -695,13 +696,15 @@ class _WorkflowApprovalScreenState extends State<WorkflowApprovalScreen> {
         Navigator.pop(context);
         Navigator.pop(context); // Go back to list
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error approving workflow: $e'),
-            backgroundColor: AppTheme.red,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not approve workflow. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkflowApproval: approve',
+          backgroundColor: AppTheme.red,
         );
       }
     } finally {
@@ -749,13 +752,15 @@ class _WorkflowApprovalScreenState extends State<WorkflowApprovalScreen> {
         Navigator.pop(context);
         Navigator.pop(context); // Go back to list
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error rejecting workflow: $e'),
-            backgroundColor: AppTheme.red,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not reject workflow. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkflowApproval: reject',
+          backgroundColor: AppTheme.red,
         );
       }
     } finally {

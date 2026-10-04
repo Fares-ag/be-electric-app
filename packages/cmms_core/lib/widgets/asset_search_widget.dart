@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../models/asset.dart';
 import '../services/hybrid_dam_service.dart';
 import '../utils/app_theme.dart';
+import '../config/locator.dart';
+import '../utils/user_facing_errors.dart';
 
 class _AssetDetailsSheet extends StatelessWidget {
   const _AssetDetailsSheet({
@@ -270,7 +272,7 @@ class _AssetSearchWidgetState extends State<AssetSearchWidget> {
   List<Asset> _assets = [];
   List<Asset> _filteredAssets = [];
   bool _isLoading = false;
-  final HybridDamService _hybridService = HybridDamService();
+  final HybridDamService _hybridService = sl<HybridDamService>();
   Timer? _searchTimer;
 
   @override
@@ -339,19 +341,21 @@ class _AssetSearchWidgetState extends State<AssetSearchWidget> {
           );
         }
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Hybrid DAM Service loading failed: $e');
       setState(() {
         _isLoading = false;
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading assets: $e'),
-            backgroundColor: AppTheme.accentRed,
-            duration: const Duration(seconds: 2),
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load assets. Please try again.',
+          stackTrace: st,
+          contextLabel: 'asset_search_widget: Could not load assets. Please ',
+          backgroundColor: AppTheme.accentRed,
+          duration: const Duration(seconds: 2),
         );
       }
     }
@@ -391,19 +395,21 @@ class _AssetSearchWidgetState extends State<AssetSearchWidget> {
           ),
         );
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Error checking for changes: $e');
       setState(() {
         _isLoading = false;
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('âŒ Error checking for changes: $e'),
-            backgroundColor: AppTheme.accentRed,
-            duration: const Duration(seconds: 2),
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not check for changes. Please try again.',
+          stackTrace: st,
+          contextLabel: 'AssetSearch: check changes',
+          backgroundColor: AppTheme.accentRed,
+          duration: const Duration(seconds: 2),
         );
       }
     }
@@ -506,17 +512,17 @@ class _AssetSearchWidgetState extends State<AssetSearchWidget> {
           );
         }
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Hybrid DAM Service search error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Search failed: $e',
-            ),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Search failed. Please try again.',
+          stackTrace: st,
+          contextLabel: 'AssetSearch: search',
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
         );
       }
       // Fallback to local filtering

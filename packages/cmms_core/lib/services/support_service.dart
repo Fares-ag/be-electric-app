@@ -8,9 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/production_config.dart';
 
 class SupportService {
-  factory SupportService() => _instance;
-  SupportService._internal();
-  static final SupportService _instance = SupportService._internal();
 
   final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
 

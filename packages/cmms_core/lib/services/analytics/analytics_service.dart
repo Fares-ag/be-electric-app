@@ -19,6 +19,7 @@ import 'package:cmms_core/services/logger_service.dart';
 import 'package:cmms_core/services/unified_data_service.dart';
 
 import 'analytics_calculator.dart';
+import '../../config/locator.dart';
 
 /// Main analytics service providing comprehensive analytics capabilities
 class AnalyticsService {
@@ -231,8 +232,7 @@ class AnalyticsService {
 
   /// Fetch notifications mapped to NotificationData for UI
   Future<List<NotificationData>> getNotifications() async {
-    final service = enh.EnhancedNotificationService();
-    await service.initialize();
+    final service = sl<enh.EnhancedNotificationService>();
     final list = service.notifications;
     return list
         .map(
@@ -256,13 +256,13 @@ class AnalyticsService {
 
   /// Mark a notification as read
   Future<void> markNotificationAsRead(String notificationId) async {
-    final service = enh.EnhancedNotificationService();
+    final service = sl<enh.EnhancedNotificationService>();
     await service.markAsRead(notificationId);
   }
 
   /// Clear all notifications
   Future<void> clearAllNotifications() async {
-    final service = enh.EnhancedNotificationService();
+    final service = sl<enh.EnhancedNotificationService>();
     await service.clearAllNotifications();
   }
 
@@ -308,7 +308,7 @@ class AnalyticsService {
 
   /// Load all system data
   Future<Map<String, dynamic>> _loadSystemData() async {
-    final dataService = UnifiedDataService.instance;
+    final dataService = sl<UnifiedDataService>();
     return {
       'workOrders': dataService.workOrders,
       'assets': dataService.assets,

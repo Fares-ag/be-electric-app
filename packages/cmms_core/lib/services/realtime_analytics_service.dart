@@ -12,12 +12,8 @@ import 'package:flutter/foundation.dart';
 import '../models/analytics_models.dart';
 
 class RealtimeAnalyticsService {
-  RealtimeAnalyticsService._();
-  static RealtimeAnalyticsService? _instance;
-  static RealtimeAnalyticsService get instance =>
-      _instance ??= RealtimeAnalyticsService._();
 
-  final SupabaseClient _client = Supabase.instance.client;
+  SupabaseClient get _client => Supabase.instance.client;
 
   // Subscriptions
   StreamSubscription<List<Map<String, dynamic>>>? _kpiSubscription;
@@ -65,6 +61,7 @@ class RealtimeAnalyticsService {
   final Set<String> _disabledStreams = <String>{};
 
   Future<void> initialize() async {
+    stopListening();
     try {
       _subscribeKPIs();
       _subscribeWorkOrdersSummary();
@@ -74,7 +71,7 @@ class RealtimeAnalyticsService {
       _subscribeTechnicianPerformance();
       _subscribeMaintenanceCosts();
       debugPrint('RealtimeAnalyticsService: initialized');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('RealtimeAnalyticsService: init error: $e');
     }
   }
@@ -108,7 +105,7 @@ class RealtimeAnalyticsService {
         'requestedAt': DateTime.now().toIso8601String(),
       });
       debugPrint('RealtimeAnalyticsService: trigger set for $docName');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('RealtimeAnalyticsService: trigger error: $e');
     }
   }
@@ -129,7 +126,7 @@ class RealtimeAnalyticsService {
           final metrics = KPIMetrics.fromJson(data);
           _kpiController.add(metrics);
           debugPrint('RealtimeAnalyticsService: KPI metrics updated');
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('RealtimeAnalyticsService: KPI parse error: $e');
         }
       },
@@ -160,7 +157,7 @@ class RealtimeAnalyticsService {
           final data = Map<String, dynamic>.from(snapshot.first);
           _normalizeIsoTimestamps(data, keys: const ['calculatedAt', 'from', 'to']);
           _workOrdersSummaryController.add(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('RealtimeAnalyticsService: WO summary parse error: $e');
         }
       },
@@ -202,7 +199,7 @@ class RealtimeAnalyticsService {
               .map(MaintenanceDataPoint.fromJson)
               .toList();
           _workOrdersTrendsController.add(points);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('RealtimeAnalyticsService: WO trend parse error: $e');
         }
       },
@@ -234,7 +231,7 @@ class RealtimeAnalyticsService {
           _normalizeIsoTimestamps(data, keys: const ['calculatedAt', 'from', 'to']);
           final ap = AssetPerformance.fromJson(data);
           _assetPerformanceController.add(ap);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('RealtimeAnalyticsService: Asset performance parse error: $e');
         }
       },
@@ -265,7 +262,7 @@ class RealtimeAnalyticsService {
           final data = Map<String, dynamic>.from(snapshot.first);
           _normalizeIsoTimestamps(data, keys: const ['calculatedAt', 'from', 'to']);
           _pmComplianceController.add(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('RealtimeAnalyticsService: PM compliance parse error: $e');
         }
       },
@@ -297,7 +294,7 @@ class RealtimeAnalyticsService {
           _normalizeIsoTimestamps(data, keys: const ['calculatedAt', 'from', 'to']);
           final perf = TechnicianPerformance.fromJson(data);
           _techPerformanceController.add(perf);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('RealtimeAnalyticsService: Tech performance parse error: $e');
         }
       },
@@ -329,7 +326,7 @@ class RealtimeAnalyticsService {
           _normalizeIsoTimestamps(data, keys: const ['calculatedAt', 'from', 'to']);
           final costs = CostAnalysis.fromJson(data);
           _maintenanceCostsController.add(costs);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('RealtimeAnalyticsService: Costs parse error: $e');
         }
       },
@@ -357,14 +354,16 @@ class RealtimeAnalyticsService {
         try {
           DateTime.parse(value);
           // Valid ISO8601 string, keep as is
-        } catch (e) {
+        } catch (e, st) {
           // Not a valid date string, skip
         }
       }
     }
   }
 
-  void dispose() {
+  /// Cancels Supabase stream subscriptions without closing broadcast controllers.
+  /// Safe to call when leaving a screen that uses [instance].
+  void stopListening() {
     _kpiSubscription?.cancel();
     _workOrdersSummarySubscription?.cancel();
     _workOrdersTrendsSubscription?.cancel();
@@ -373,12 +372,39 @@ class RealtimeAnalyticsService {
     _techPerformanceSubscription?.cancel();
     _maintenanceCostsSubscription?.cancel();
 
-    _kpiController.close();
-    _workOrdersSummaryController.close();
-    _workOrdersTrendsController.close();
-    _assetPerformanceController.close();
-    _pmComplianceController.close();
-    _techPerformanceController.close();
-    _maintenanceCostsController.close();
+    _kpiSubscription = null;
+    _workOrdersSummarySubscription = null;
+    _workOrdersTrendsSubscription = null;
+    _assetPerformanceSubscription = null;
+    _pmComplianceSubscription = null;
+    _techPerformanceSubscription = null;
+    _maintenanceCostsSubscription = null;
+  }
+
+  /// Tears down the app-wide singleton. Do not call from widget [dispose].
+  void dispose() {
+    stopListening();
+
+    if (!_kpiController.isClosed) {
+      _kpiController.close();
+    }
+    if (!_workOrdersSummaryController.isClosed) {
+      _workOrdersSummaryController.close();
+    }
+    if (!_workOrdersTrendsController.isClosed) {
+      _workOrdersTrendsController.close();
+    }
+    if (!_assetPerformanceController.isClosed) {
+      _assetPerformanceController.close();
+    }
+    if (!_pmComplianceController.isClosed) {
+      _pmComplianceController.close();
+    }
+    if (!_techPerformanceController.isClosed) {
+      _techPerformanceController.close();
+    }
+    if (!_maintenanceCostsController.isClosed) {
+      _maintenanceCostsController.close();
+    }
   }
 }

@@ -81,4 +81,40 @@ void main() {
       expect(kAutoCreatedUserRole, isNot('admin'));
     });
   });
+
+  group('debug auth fallbacks', () {
+    test('local session restore blocked in release', () {
+      expect(shouldAllowLocalSessionRestore(isReleaseMode: true), isFalse);
+      expect(shouldAllowLocalSessionRestore(isReleaseMode: false), isTrue);
+    });
+
+    test('passwordless database auth requires debug non-release', () {
+      expect(
+        shouldAllowDebugDatabaseAuth(
+          isReleaseMode: false,
+          isDebugMode: true,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldAllowDebugDatabaseAuth(
+          isReleaseMode: true,
+          isDebugMode: false,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldAllowDebugDatabaseAuth(
+          isReleaseMode: false,
+          isDebugMode: false,
+        ),
+        isFalse,
+      );
+    });
+
+    test('demo user fallback requires demo mode flag', () {
+      expect(shouldAllowDemoUserFallback(isDemoMode: true), isTrue);
+      expect(shouldAllowDemoUserFallback(isDemoMode: false), isFalse);
+    });
+  });
 }

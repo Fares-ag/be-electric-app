@@ -1,29 +1,50 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/inventory_item.dart';
-import '../services/supabase_database_service.dart';
-import 'unified_data_provider.dart';
+import '../repositories/cmms_repositories.dart';
+import '../services/unified_data_service.dart';
+import '../utils/performance_optimizer.dart';
+import '../utils/stream_subscription_cancel.dart';
+import 'domain/cmms_domain_provider.dart';
+import '../config/locator.dart';
 
-class InventoryProvider with ChangeNotifier {
+/// Inventory state: realtime cache, CRUD, and UI filtering.
+class InventoryProvider with ChangeNotifier implements CmmsDomainProvider {
+  InventoryProvider({UnifiedDataService? dataService})
+      : _dataService = dataService ?? sl<UnifiedDataService>();
+
+  final UnifiedDataService _dataService;
+  bool _isDisposed = false;
+  StreamSubscription<List<InventoryItem>>? _inventorySubscription;
+  List<InventoryItem> _realtimeInventory = [];
+
   List<InventoryItem> _inventoryItems = [];
   List<InventoryItem> _filteredInventoryItems = [];
   bool _isLoading = false;
   String _selectedFilter = 'all';
-  UnifiedDataProvider? _unifiedDataProvider;
 
   List<InventoryItem> get inventoryItems => _filteredInventoryItems;
-  bool get isLoading => _isLoading;
+
+  /// Canonical inventory list (realtime when available).
+  List<InventoryItem> get items => _realtimeInventory.isNotEmpty
+      ? _realtimeInventory
+      : _dataService.inventoryItems;
+
+  bool get isLoading => _isLoading || _dataService.isInventoryLoading;
   String get selectedFilter => _selectedFilter;
 
-  // Set the UnifiedDataProvider reference
-  void setUnifiedDataProvider(UnifiedDataProvider provider) {
-    _unifiedDataProvider = provider;
-  }
+  Stream<List<InventoryItem>> get inventoryItemsStream =>
+      _dataService.inventoryItemsStream;
 
-  // Statistics
-  int get totalItems => _inventoryItems.length;
+  int get totalInventory => items.length;
   int get lowStockItems =>
+      items.where((item) => item.quantity <= 10).length;
+
+  int get totalItems => _inventoryItems.length;
+  int get lowStockItemsFiltered =>
       _inventoryItems.where((item) => item.isLowStock).length;
   int get outOfStockItems =>
       _inventoryItems.where((item) => item.isOutOfStock).length;
@@ -38,32 +59,38 @@ class InventoryProvider with ChangeNotifier {
         (sum, item) => sum + (item.quantity * (item.cost ?? 0)),
       );
 
+  List<InventoryItem> getLowStockItems({double? threshold}) =>
+      items.where((item) {
+        final minThreshold = threshold ?? item.minimumStock ?? 0;
+        return item.quantity < minThreshold;
+      }).toList();
+
+  List<InventoryItem> getInventoryByCategory(String category) {
+    final target = category.toLowerCase();
+    return items
+        .where((item) => item.category.toLowerCase() == target)
+        .toList();
+  }
+
   Future<void> loadInventory() async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      // Use UnifiedDataProvider if available (real-time Supabase data!)
-      if (_unifiedDataProvider != null) {
-        debugPrint(
-            '📦 InventoryProvider: Loading from UnifiedDataProvider (Supabase)',);
-        _inventoryItems = _unifiedDataProvider!.inventoryItems;
-        debugPrint(
-            'ðŸ"¦ InventoryProvider: Loaded ${_inventoryItems.length} items from Supabase',);
-      } else {
-        // Fallback to Supabase directly
-        debugPrint(
-            'ðŸ"¦ InventoryProvider: Loading from Supabase directly',);
-        _inventoryItems =
-            await SupabaseDatabaseService.instance.getAllInventoryItems();
-      }
+      _inventoryItems = items;
       _applyFilters();
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading inventory: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  void syncFromRealtime() {
+    _inventoryItems = items;
+    _applyFilters();
+    notifyListeners();
   }
 
   Future<String> createInventoryItem({
@@ -114,13 +141,13 @@ class InventoryProvider with ChangeNotifier {
         updatedAt: now,
       );
 
-      await SupabaseDatabaseService.instance.createInventoryItem(item);
+      await CmmsRepositories.inventory.createInventoryItem(item);
       _inventoryItems.add(item);
       _applyFilters();
       notifyListeners();
 
       return item.id;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error creating inventory item: $e');
       rethrow;
     }
@@ -133,7 +160,10 @@ class InventoryProvider with ChangeNotifier {
         lastUpdated: DateTime.now(),
       );
 
-      await SupabaseDatabaseService.instance.updateInventoryItem(updatedItem.id, updatedItem);
+      await CmmsRepositories.inventory.updateInventoryItem(
+        updatedItem.id,
+        updatedItem,
+      );
 
       final index = _inventoryItems.indexWhere((i) => i.id == item.id);
       if (index != -1) {
@@ -141,7 +171,7 @@ class InventoryProvider with ChangeNotifier {
         _applyFilters();
         notifyListeners();
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error updating inventory item: $e');
       rethrow;
     }
@@ -149,11 +179,11 @@ class InventoryProvider with ChangeNotifier {
 
   Future<void> deleteInventoryItem(String itemId) async {
     try {
-      await SupabaseDatabaseService.instance.deleteInventoryItem(itemId);
+      await CmmsRepositories.inventory.deleteInventoryItem(itemId);
       _inventoryItems.removeWhere((item) => item.id == itemId);
       _applyFilters();
       notifyListeners();
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error deleting inventory item: $e');
       rethrow;
     }
@@ -188,11 +218,10 @@ class InventoryProvider with ChangeNotifier {
         lastUpdated: DateTime.now(),
       );
 
-      await SupabaseDatabaseService.instance.updateInventoryItem(updatedItem.id, updatedItem);
-
-      // Note: InventoryTransaction methods can be added to Supabase if needed in the future
-      // This functionality needs to be implemented if required
-      // Transaction records can be added to Supabase if needed in the future
+      await CmmsRepositories.inventory.updateInventoryItem(
+        updatedItem.id,
+        updatedItem,
+      );
 
       final index = _inventoryItems.indexWhere((i) => i.id == itemId);
       if (index != -1) {
@@ -200,7 +229,7 @@ class InventoryProvider with ChangeNotifier {
         _applyFilters();
         notifyListeners();
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error adjusting inventory: $e');
       rethrow;
     }
@@ -257,7 +286,7 @@ class InventoryProvider with ChangeNotifier {
         .toList();
   }
 
-  List<InventoryItem> getLowStockItems() =>
+  List<InventoryItem> getLowStockItemsList() =>
       _inventoryItems.where((item) => item.isLowStock).toList();
 
   List<InventoryItem> getOutOfStockItems() =>
@@ -272,5 +301,56 @@ class InventoryProvider with ChangeNotifier {
       stats[item.category] = (stats[item.category] ?? 0) + 1;
     }
     return stats;
+  }
+
+  @override
+  void clearCache() {
+    _realtimeInventory = [];
+    _inventoryItems = [];
+    _filteredInventoryItems = [];
+  }
+
+  @override
+  Future<void> cancelRealtimeListeners() async {
+    await cancelStreamSubscriptions([_inventorySubscription]);
+    _inventorySubscription = null;
+  }
+
+  @override
+  Future<void> startRealtimeListeners() async {
+    if (_isDisposed) return;
+    await cancelRealtimeListeners();
+    if (_isDisposed) return;
+
+    _inventorySubscription = _dataService.inventoryItemsStream.listen(
+      (inventory) {
+        _realtimeInventory = inventory;
+        syncFromRealtime();
+        if (!_isDisposed) {
+          ChangeNotifierBatcher.batchNotify(
+            () => notifyListeners(),
+            batchKey: this,
+          );
+        }
+      },
+      onError: (error) {
+        debugPrint('❌ Inventory stream error: $error');
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    ChangeNotifierBatcher.cancel(this);
+    unawaited(cancelRealtimeListeners());
+    super.dispose();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
   }
 }

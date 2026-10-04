@@ -3,7 +3,9 @@ import 'package:cmms_core/models/parts_request.dart';
 import 'package:cmms_core/models/purchase_order.dart';
 import 'package:cmms_core/services/parts_request_service.dart';
 import 'package:cmms_core/services/purchase_order_service.dart';
-import 'package:cmms_core/theme/app_theme.dart';
+import 'package:cmms_core/utils/app_theme.dart';
+import '../../config/locator.dart';
+import '../../utils/user_facing_errors.dart';
 
 class PurchaseOrderScreen extends StatefulWidget {
   const PurchaseOrderScreen({super.key});
@@ -13,8 +15,8 @@ class PurchaseOrderScreen extends StatefulWidget {
 }
 
 class _PurchaseOrderScreenState extends State<PurchaseOrderScreen> {
-  final PurchaseOrderService _purchaseOrderService = PurchaseOrderService();
-  final PartsRequestService _partsRequestService = PartsRequestService();
+  final PurchaseOrderService _purchaseOrderService = sl<PurchaseOrderService>();
+  final PartsRequestService _partsRequestService = sl<PartsRequestService>();
 
   List<PurchaseOrder> _purchaseOrders = [];
   List<PartsRequest> _pendingPartsRequests = [];
@@ -37,8 +39,14 @@ class _PurchaseOrderScreenState extends State<PurchaseOrderScreen> {
         _purchaseOrders = orders;
         _pendingPartsRequests = requests;
       });
-    } catch (e) {
-      _showErrorSnackBar('Failed to load data: $e');
+    } catch (e, st) {
+      showUserErrorSnackBar(
+        context,
+        e,
+        genericMessage: 'Could not load data. Please try again.',
+        stackTrace: st,
+        contextLabel: 'PurchaseOrderScreen: load data',
+      );
     } finally {
       setState(() => _isLoading = false);
     }
@@ -63,8 +71,14 @@ class _PurchaseOrderScreenState extends State<PurchaseOrderScreen> {
 
       await _loadData();
       _showSuccessSnackBar('Purchase order created successfully');
-    } catch (e) {
-      _showErrorSnackBar('Failed to create purchase order: $e');
+    } catch (e, st) {
+      showUserErrorSnackBar(
+        context,
+        e,
+        genericMessage: 'Could not create purchase order. Please try again.',
+        stackTrace: st,
+        contextLabel: 'PurchaseOrderScreen: create order',
+      );
     } finally {
       setState(() => _isLoading = false);
     }
@@ -121,7 +135,7 @@ class _PurchaseOrderScreenState extends State<PurchaseOrderScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildStatsCards(),
-                    const SizedBox(height: AppTheme.spacingL),
+                    const SizedBox(height: AppTheme.spacingXL),
                     _buildPurchaseOrdersList(),
                   ],
                 ),
@@ -197,7 +211,7 @@ class _PurchaseOrderScreenState extends State<PurchaseOrderScreen> {
       return Card(
         elevation: AppTheme.elevationS,
         child: Padding(
-          padding: const EdgeInsets.all(AppTheme.spacingL),
+          padding: const EdgeInsets.all(AppTheme.spacingXL),
           child: Center(
             child: Column(
               children: [

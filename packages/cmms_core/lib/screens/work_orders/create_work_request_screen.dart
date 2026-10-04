@@ -3,19 +3,26 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../config/app_config.dart';
+import '../../config/locator.dart';
 import '../../models/asset.dart';
 import '../../models/user.dart';
-import '../../models/work_order.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
+import '../../services/connectivity_service.dart';
 import '../../screens/assets/enhanced_asset_details_screen.dart';
 import '../../services/performance_service.dart';
+import '../../services/unified_data_service.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/charger_asset_filter.dart';
+import '../../utils/requestor_category_mapper.dart';
 import '../../utils/responsive_layout.dart';
 import '../../widgets/enhanced_asset_display_widget.dart';
 import '../../widgets/enhanced_asset_selection_widget.dart';
 import '../../widgets/mobile_qr_scanner_widget.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CreateWorkRequestScreen extends StatefulWidget {
   const CreateWorkRequestScreen({super.key, this.initialAsset});
@@ -38,13 +45,15 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
   Asset? _selectedAsset;
   String? _photoPath;
   final Set<String> _selectedTechnicianIds = <String>{};
-  WorkOrderPriority _selectedPriority = WorkOrderPriority.medium;
-  RepairCategory? _selectedCategory;
+  final _contactNumberController = TextEditingController();
+  final _emailController = TextEditingController();
+  String? _selectedCategoryIssue;
   bool _isLoading = false;
 
-  // NEW: General maintenance fields
-  bool _isGeneralMaintenance = false;
-  String? _facilityType;
+  bool _isUnregisteredCharger = false;
+  final _unregisteredNameController = TextEditingController();
+  final _serialNumberController = TextEditingController();
+  final _assetTagController = TextEditingController();
 
   // NEW: For requestors - manufacturer selection and charger dropdown
   String? _selectedManufacturer; // 'Siemens' or 'Kostad'
@@ -58,7 +67,28 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
     if (widget.initialAsset != null) {
       _selectedAsset = widget.initialAsset;
       _selectedAssetId = widget.initialAsset!.id;
+      if (isChargerLikeAsset(widget.initialAsset!)) {
+        _selectedManufacturer = createFormChargerBrand(widget.initialAsset!);
+      }
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_selectedManufacturer != null) {
+        _loadCompanyChargers(_selectedManufacturer!);
+      }
+      final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+      if (user != null) {
+        setState(() {
+          if (_requestorNameController.text.isEmpty) {
+            _requestorNameController.text = user.name;
+          }
+          _emailController.text =
+              (user.workEmail != null && user.workEmail!.isNotEmpty)
+                  ? user.workEmail!
+                  : user.email;
+        });
+      }
+    });
   }
 
   @override
@@ -66,46 +96,12 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
     _problemController.dispose();
     _locationController.dispose();
     _requestorNameController.dispose();
+    _contactNumberController.dispose();
+    _emailController.dispose();
+    _unregisteredNameController.dispose();
+    _serialNumberController.dispose();
+    _assetTagController.dispose();
     super.dispose();
-  }
-
-  // Facility type options
-  final Map<String, String> _facilityTypes = {
-    'Civil': 'Wall Paint, Wall Repairs, Ceiling, etc.',
-    'MEP': 'Plumbing, Sliding Door, etc.',
-    'Appliances': 'Kettle, Fridge, Microwaves, TV, etc.',
-    'Electrical': 'Lights, Sockets, Wires, etc.',
-    'Carpentry': 'Ceiling, Wooden Door, etc.',
-    'Others': 'Plants, etc.',
-  };
-
-  String _getCategoryDisplayName(RepairCategory category) {
-    switch (category) {
-      case RepairCategory.mechanicalHvac:
-        return 'Mechanical & HVAC Repairs';
-      case RepairCategory.electrical:
-        return 'Electrical Repairs';
-      case RepairCategory.structural:
-        return 'Structural Repairs';
-      case RepairCategory.plumbing:
-        return 'Plumbing and Water System Repairs';
-      case RepairCategory.interior:
-        return 'Interior Repairs';
-      case RepairCategory.exterior:
-        return 'Exterior Repairs';
-      case RepairCategory.itLowVoltage:
-        return 'IT & Low Voltage System Repairs';
-      case RepairCategory.specializedEquipment:
-        return 'Specialized Equipment Repairs';
-      case RepairCategory.safetyCompliance:
-        return 'Safety & Compliance Repairs';
-      case RepairCategory.emergency:
-        return 'Emergency or Unscheduled Repairs';
-      case RepairCategory.preventive:
-        return 'Preventive Maintenance';
-      case RepairCategory.reactive:
-        return 'Reactive Maintenance';
-    }
   }
 
   Future<void> _pickImage() async {
@@ -128,13 +124,15 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
           _photoPath = compressedPath;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to capture image: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not capture image. Please try again.',
+          stackTrace: st,
+          contextLabel: 'create_work_request_screen: Could not capture image. Pleas',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     }
@@ -160,13 +158,15 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
           _photoPath = compressedPath;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to select image: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not select image. Please try again.',
+          stackTrace: st,
+          contextLabel: 'create_work_request_screen: Could not select image. Please',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     }
@@ -203,25 +203,49 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
   Future<void> _submitRequest() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Validate: either asset is selected OR general maintenance with location
-    if (!_isGeneralMaintenance && _selectedAssetId == null) {
+    if (_selectedCategoryIssue == null || _selectedCategoryIssue!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select an asset or enable general maintenance'),
+          content: Text('Please select a category'),
           backgroundColor: AppTheme.errorColor,
         ),
       );
       return;
     }
 
-    if (_isGeneralMaintenance && _locationController.text.trim().isEmpty) {
+    // Validate: either asset is selected OR general maintenance with location
+    if (!_isUnregisteredCharger && _selectedAssetId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please specify the location for facility maintenance'),
+          content: Text(
+            'Please select a charger or add one that is not in the system',
+          ),
           backgroundColor: AppTheme.errorColor,
         ),
       );
       return;
+    }
+
+    if (_isUnregisteredCharger) {
+      if (_selectedManufacturer == null || _selectedManufacturer!.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select Siemens or Kostad'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+        return;
+      }
+      if (_unregisteredNameController.text.trim().isEmpty ||
+          _locationController.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter the charger name and location'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+        return;
+      }
     }
 
     setState(() {
@@ -235,31 +259,71 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
         listen: false,
       );
 
-      // Build description with facility type if general maintenance
-      var description = _problemController.text.trim();
-      if (_isGeneralMaintenance && _facilityType != null) {
-        description = '[$_facilityType] $description';
+      final description = _problemController.text.trim();
+
+      final isTechnician = authProvider.currentUser?.role == 'technician';
+      final wasOffline = AppConfig.isOfflineModeEnabled &&
+          !sl<ConnectivityService>().isOnline;
+
+      var workAsset = _selectedAsset;
+      var workAssetId = _selectedAssetId;
+
+      if (_isUnregisteredCharger) {
+        final draft = buildFieldAddedCharger(
+          id: const Uuid().v4(),
+          name: _unregisteredNameController.text.trim(),
+          location: _locationController.text.trim(),
+          manufacturer: _selectedManufacturer!,
+          serialNumber: _serialNumberController.text.trim(),
+          assetTag: _assetTagController.text.trim(),
+          companyId: authProvider.currentUser?.companyId,
+        );
+        try {
+          final createdId = await sl<UnifiedDataService>().createAsset(draft);
+          workAsset = draft.copyWith(id: createdId);
+          workAssetId = createdId;
+        } catch (e) {
+          if (wasOffline) {
+            workAsset = draft;
+            workAssetId = draft.id;
+          } else {
+            rethrow;
+          }
+        }
       }
 
-      // If the current user is a technician, don't pass assignedTechnicianIds
-      // The provider will auto-assign to them
-      final isTechnician = authProvider.currentUser?.role == 'technician';
-      
+      final categoryIssue = _selectedCategoryIssue ?? '';
+      final submissionFields = mapRequestorCategoryIssue(categoryIssue);
+      final chargerType = _selectedManufacturer ?? workAsset?.manufacturer ?? '';
+      final chargerId = workAsset?.qrCode ??
+          workAsset?.qrCodeId ??
+          workAssetId ??
+          '';
+      final name = _requestorNameController.text.trim();
+      final contact = _contactNumberController.text.trim();
+      final email = _emailController.text.trim();
+      final notes = buildMaintenanceRequestNotes(
+        chargerType: chargerType,
+        chargerId: chargerId,
+        categoryIssue: categoryIssue,
+      );
+
       await unifiedProvider.createWorkOrder(
-        assetId: _selectedAssetId, // Can be null for general maintenance
-        asset: _selectedAsset, // Pass the full asset object
-        location: _isGeneralMaintenance
+        assetId: workAssetId,
+        asset: workAsset,
+        location: _isUnregisteredCharger
             ? _locationController.text.trim()
-            : null, // Store location for general maintenance
+            : null,
         problemDescription: description,
         requestorId: authProvider.currentUser!.id,
         photoPath: _photoPath,
-        priority: _selectedPriority,
-        category: _selectedCategory,
-        requestorName: _requestorNameController.text.trim().isEmpty
-            ? null
-            : _requestorNameController.text.trim(),
-        // Technicians can't assign others - they're auto-assigned
+        priority: submissionFields.priority,
+        category: submissionFields.category,
+        requestorName: name.isEmpty ? null : name,
+        customerName: name.isEmpty ? null : name,
+        customerPhone: contact.isEmpty ? null : contact,
+        customerEmail: email.isEmpty ? null : email,
+        notes: notes,
         assignedTechnicianIds: isTechnician
             ? null
             : (_selectedTechnicianIds.isEmpty
@@ -269,20 +333,26 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Work request created successfully'),
+          SnackBar(
+            content: Text(
+              wasOffline
+                  ? 'Work order saved locally — will sync when online'
+                  : 'Work request created successfully',
+            ),
             backgroundColor: AppTheme.successColor,
           ),
         );
         Navigator.pop(context, true);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating work request: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not create work request. Please try again.',
+          stackTrace: st,
+          contextLabel: 'create_work_request_screen: Could not create work request.',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {
@@ -316,7 +386,7 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Asset Information',
+                          'Charger',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -324,22 +394,20 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // NEW: General Maintenance Checkbox
                         CheckboxListTile(
                           title: const Text(
-                            'General Facility Maintenance',
+                            'Charger not in the system',
                             style: TextStyle(fontWeight: FontWeight.w600),
                           ),
                           subtitle: const Text(
-                            'For work not tied to a specific asset (e.g., painting walls, plumbing)',
+                            'Add a Siemens or Kostad charger that is not listed, then create the work order',
                             style: TextStyle(fontSize: 12),
                           ),
-                          value: _isGeneralMaintenance,
+                          value: _isUnregisteredCharger,
                           onChanged: (value) {
                             setState(() {
-                              _isGeneralMaintenance = value ?? false;
-                              if (_isGeneralMaintenance) {
-                                // Clear asset selection when switching to general maintenance
+                              _isUnregisteredCharger = value ?? false;
+                              if (_isUnregisteredCharger) {
                                 _selectedAsset = null;
                                 _selectedAssetId = null;
                               }
@@ -349,74 +417,93 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Show facility type and location if general maintenance
-                        if (_isGeneralMaintenance) ...[
-                          // Facility Type Dropdown
+                        if (_isUnregisteredCharger) ...[
                           DropdownButtonFormField<String>(
-                            initialValue: _facilityType,
+                            initialValue: _selectedManufacturer,
                             decoration: const InputDecoration(
-                              labelText: 'Facility Type',
+                              labelText: 'Charger type *',
+                              hintText: 'Choose Siemens or Kostad',
                               border: OutlineInputBorder(),
-                              prefixIcon: Icon(Icons.construction),
+                              prefixIcon: Icon(Icons.ev_station),
                             ),
-                            hint: const Text('Select facility type'),
-                            items: _facilityTypes.entries
-                                .map(
-                                  (entry) => DropdownMenuItem(
-                                    value: entry.key,
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          entry.key,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                        Text(
-                                          entry.value,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey[600],
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                )
-                                .toList(),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'Siemens',
+                                child: Text('Siemens Charger'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'Kostad',
+                                child: Text('Kostad Charger'),
+                              ),
+                            ],
+                            validator: (value) {
+                              if (_isUnregisteredCharger &&
+                                  (value == null || value.isEmpty)) {
+                                return 'Please select Siemens or Kostad';
+                              }
+                              return null;
+                            },
                             onChanged: (value) {
                               setState(() {
-                                _facilityType = value;
+                                _selectedManufacturer = value;
                               });
                             },
                           ),
                           const SizedBox(height: 16),
-
-                          // Location Field
                           TextFormField(
-                            controller: _locationController,
+                            controller: _unregisteredNameController,
                             decoration: const InputDecoration(
-                              labelText: 'Location *',
-                              hintText: 'e.g., Conference Room 3B, Main Lobby',
+                              labelText: 'Charger name *',
+                              hintText: 'e.g. Mall P2 charger 3',
                               border: OutlineInputBorder(),
-                              prefixIcon: Icon(Icons.location_on),
+                              prefixIcon: Icon(Icons.badge_outlined),
                             ),
                             validator: (value) {
-                              if (_isGeneralMaintenance &&
+                              if (_isUnregisteredCharger &&
                                   (value == null || value.trim().isEmpty)) {
-                                return 'Please specify the location';
+                                return 'Please enter the charger name';
                               }
                               return null;
                             },
                           ),
                           const SizedBox(height: 16),
-
+                          TextFormField(
+                            controller: _locationController,
+                            decoration: const InputDecoration(
+                              labelText: 'Location *',
+                              hintText: 'e.g. Building A, P2 bay 4',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.location_on),
+                            ),
+                            validator: (value) {
+                              if (_isUnregisteredCharger &&
+                                  (value == null || value.trim().isEmpty)) {
+                                return 'Please enter the charger location';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _serialNumberController,
+                            decoration: const InputDecoration(
+                              labelText: 'Serial number',
+                              hintText: 'If available',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.numbers),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _assetTagController,
+                            decoration: const InputDecoration(
+                              labelText: 'Asset tag / QR',
+                              hintText: 'If available',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.qr_code_2),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
@@ -434,7 +521,7 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'This work order will not be linked to a specific asset',
+                                    'This charger will be added to the catalog, then the work order will be created on it',
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: Colors.blue[900],
@@ -446,43 +533,38 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                           ),
                         ],
 
-                        // Show asset selection if NOT general maintenance
-                        if (!_isGeneralMaintenance) ...[
+                        if (!_isUnregisteredCharger) ...[
                           // For requestors: Show manufacturer selector and charger dropdown
                           Consumer<AuthProvider>(
                             builder: (context, authProvider, _) {
-                              final isRequestor = authProvider.currentUser?.role == 'requestor';
-                              
-                              if (isRequestor) {
-                                return _buildRequestorChargerSelection();
+                              final role = authProvider.currentUser?.role;
+                              final isRequestor = role == 'requestor';
+                              final isTechnician = role == 'technician';
+
+                              if (isRequestor || isTechnician) {
+                                return Column(
+                                  children: [
+                                    if (isTechnician) ...[
+                                      ElevatedButton.icon(
+                                        onPressed: _scanChargerQr,
+                                        icon: const Icon(Icons.qr_code_scanner),
+                                        label: const Text('Scan charger QR'),
+                                      ),
+                                      const SizedBox(height: 16),
+                                    ],
+                                    _buildChargerSelection(),
+                                  ],
+                                );
                               }
-                              
-                              // For non-requestors: Show QR scanner and enhanced search
+
                               return Column(
                                 children: [
-                                  // QR Scanner Button
                                   ElevatedButton.icon(
-                                    onPressed: () async {
-                                      final result = await Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              const MobileQRScannerWidget(),
-                                        ),
-                                      );
-
-                                      if (result != null && mounted) {
-                                        setState(() {
-                                          _selectedAssetId = result['assetId'];
-                                        });
-                                      }
-                                    },
+                                    onPressed: _scanChargerQr,
                                     icon: const Icon(Icons.qr_code_scanner),
                                     label: const Text('Scan QR Code'),
                                   ),
                                   const SizedBox(height: 8),
-
-                                  // Enhanced Asset Selection Button
                                   ElevatedButton.icon(
                                     onPressed: () async {
                                       final result = await Navigator.push(
@@ -504,7 +586,7 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                                       }
                                     },
                                     icon: const Icon(Icons.search),
-                                    label: const Text('🚀 Enhanced Asset Search'),
+                                    label: const Text('Search assets'),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.green,
                                       foregroundColor: Colors.white,
@@ -520,7 +602,7 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                           if (_selectedAsset != null) ...[
                             const SizedBox(height: 16),
                             const Text(
-                              'Selected Asset:',
+                              'Selected charger:',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -536,26 +618,89 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                               onEditAsset: (asset) => _selectAsset(),
                             ),
                           ],
-                        ], // End of if (!_isGeneralMaintenance)
+                        ],
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
 
-                // Optional Requestor Name (for admin/technician logging on behalf of someone)
                 TextFormField(
                   controller: _requestorNameController,
                   decoration: const InputDecoration(
-                    labelText: 'Requestor Name (Optional)',
-                    hintText: 'Name of the person requesting the work',
+                    labelText: 'Name *',
+                    hintText: 'Enter name',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.person_outline),
                   ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter your name';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
-
-                // Problem Description Card
+                TextFormField(
+                  controller: _contactNumberController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Contact number',
+                    hintText: 'Enter number',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.phone_outlined),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Email *',
+                    hintText: 'Enter your work email',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter your email';
+                    }
+                    if (!value.contains('@')) {
+                      return 'Please enter a valid email';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedCategoryIssue,
+                  decoration: const InputDecoration(
+                    labelText: 'Category issue *',
+                    hintText: 'Select type of issue',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.category_outlined),
+                  ),
+                  items: kRequestorCategoryIssueOptions
+                      .map(
+                        (option) => DropdownMenuItem(
+                          value: option,
+                          child: Text(option),
+                        ),
+                      )
+                      .toList(),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Please select a category';
+                    }
+                    return null;
+                  },
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedCategoryIssue = value;
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -574,113 +719,17 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                           controller: _problemController,
                           maxLines: 4,
                           decoration: const InputDecoration(
-                            hintText: 'Describe the problem or issue...',
+                            hintText: 'Enter a detailed description of the issue...',
                             border: OutlineInputBorder(),
                           ),
                           validator: (value) {
                             if (value == null || value.trim().isEmpty) {
                               return 'Please describe the problem';
                             }
-                            return null;
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Priority Selection Card
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Priority',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        DropdownButtonFormField<WorkOrderPriority>(
-                          initialValue: _selectedPriority,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                          ),
-                          items: WorkOrderPriority.values
-                              .map(
-                                (priority) => DropdownMenuItem(
-                                  value: priority,
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 12,
-                                        height: 12,
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.getPriorityColor(
-                                            priority.name,
-                                          ),
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(priority.name.toUpperCase()),
-                                    ],
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() {
-                                _selectedPriority = value;
-                              });
+                            if (value.trim().length < 10) {
+                              return 'Please provide a more detailed description';
                             }
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Category Selection Card
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Repair Category',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        DropdownButtonFormField<RepairCategory>(
-                          initialValue: _selectedCategory,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                            hintText: 'Select repair category',
-                          ),
-                          items: RepairCategory.values
-                              .map(
-                                (category) => DropdownMenuItem(
-                                  value: category,
-                                  child:
-                                      Text(_getCategoryDisplayName(category)),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            setState(() {
-                              _selectedCategory = value;
-                            });
+                            return null;
                           },
                         ),
                       ],
@@ -771,8 +820,47 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
         ),
       );
 
+  Future<void> _scanChargerQr() async {
+    final result = await Navigator.push<Asset>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const MobileQRScannerWidget(
+          returnResolvedAsset: true,
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      _applySelectedCharger(result);
+    }
+  }
+
+  void _applySelectedCharger(Asset asset) {
+    if (!isChargerLikeAsset(asset)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'That QR is not a charger. Select a Siemens or Kostad charger.',
+          ),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _selectedAsset = asset;
+      _selectedAssetId = asset.id;
+      _selectedManufacturer = createFormChargerBrand(asset);
+    });
+    _loadCompanyChargers(_selectedManufacturer!);
+  }
+
   // Handler for Enhanced Asset Selection
   void _handleAssetSelection(Asset asset) {
+    if (isChargerLikeAsset(asset)) {
+      _applySelectedCharger(asset);
+      return;
+    }
     setState(() {
       _selectedAsset = asset;
       _selectedAssetId = asset.id;
@@ -797,8 +885,7 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
     // The button press will handle this
   }
 
-  // Build requestor charger selection UI
-  Widget _buildRequestorChargerSelection() {
+  Widget _buildChargerSelection() {
     return Consumer<UnifiedDataProvider>(
       builder: (context, unifiedProvider, _) {
         return Column(
@@ -860,7 +947,7 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'No $_selectedManufacturer chargers found for your company',
+                          _chargerEmptyMessage(),
                           style: TextStyle(color: Colors.orange[900]),
                         ),
                       ),
@@ -869,7 +956,12 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                 )
               else
                 DropdownButtonFormField<Asset>(
-                  initialValue: _selectedAsset,
+                  key: ValueKey(
+                    '${_selectedManufacturer}_${_selectedAsset?.id}_${_companyChargers.length}',
+                  ),
+                  initialValue: _companyChargers.contains(_selectedAsset)
+                      ? _selectedAsset
+                      : null,
                   decoration: InputDecoration(
                     labelText: 'Select Charger *',
                     hintText: 'Choose a charger',
@@ -877,6 +969,18 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                     prefixIcon: const Icon(Icons.ev_station),
                     helperText: '${_companyChargers.length} charger${_companyChargers.length != 1 ? 's' : ''} available',
                   ),
+                  selectedItemBuilder: (context) => _companyChargers
+                      .map(
+                        (charger) => Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            charger.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
                   items: _companyChargers.map((charger) {
                     // Build display text with all important details
                     final details = <String>[];
@@ -935,7 +1039,16 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
     );
   }
 
-  // Load chargers filtered by company and manufacturer
+  String _chargerEmptyMessage() {
+    final isRequestor =
+        Provider.of<AuthProvider>(context, listen: false).currentUser?.role ==
+            'requestor';
+    if (isRequestor) {
+      return 'No $_selectedManufacturer chargers found for your company';
+    }
+    return 'No $_selectedManufacturer chargers found';
+  }
+
   Future<void> _loadCompanyChargers(String manufacturer) async {
     setState(() {
       _isLoadingChargers = true;
@@ -945,10 +1058,14 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final user = authProvider.currentUser;
+      final isRequestor = user?.role == 'requestor';
       final companyId = user?.companyId;
 
-      if (companyId == null) {
+      if (isRequestor && (companyId == null || companyId.trim().isEmpty)) {
         if (mounted) {
+          setState(() {
+            _isLoadingChargers = false;
+          });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('No company assigned to your account'),
@@ -959,41 +1076,47 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
         return;
       }
 
-      final unifiedProvider = Provider.of<UnifiedDataProvider>(context, listen: false);
-      
-      // Get all assets and filter by company and manufacturer
-      final allAssets = unifiedProvider.assets;
-      final chargers = allAssets.where((asset) {
-        // Must be from the same company
-        if (asset.companyId != companyId) return false;
-        
-        // Must be a charger
-        final isCharger = asset.itemType?.toLowerCase() == 'charger' ||
-            asset.category?.toLowerCase() == 'charger' ||
-            asset.name.toLowerCase().contains('charger');
-        if (!isCharger) return false;
-        
-        // Must match manufacturer
-        if (asset.manufacturer == null) return false;
-        return asset.manufacturer!.toLowerCase() == manufacturer.toLowerCase();
-      }).toList();
+      final unifiedProvider =
+          Provider.of<UnifiedDataProvider>(context, listen: false);
+      final chargers = chargersForCreateForm(
+        assets: unifiedProvider.assets,
+        manufacturer: manufacturer,
+        companyId: companyId,
+        restrictToCompany: isRequestor,
+      );
 
       if (mounted) {
+        final selectedId = _selectedAssetId ?? _selectedAsset?.id;
+        Asset? selectedInList;
+        if (selectedId != null) {
+          for (final charger in chargers) {
+            if (charger.id == selectedId) {
+              selectedInList = charger;
+              break;
+            }
+          }
+        }
         setState(() {
           _companyChargers = chargers;
           _isLoadingChargers = false;
+          if (selectedInList != null) {
+            _selectedAsset = selectedInList;
+            _selectedAssetId = selectedInList.id;
+          }
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
         setState(() {
           _isLoadingChargers = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading chargers: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load chargers. Please try again.',
+          stackTrace: st,
+          contextLabel: 'create_work_request_screen: Could not load chargers. Pleas',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }

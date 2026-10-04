@@ -14,26 +14,24 @@ import 'escalation_service.dart';
 import 'simplified_reporting_service.dart';
 import 'unified_data_service.dart';
 import 'workflow_automation_service.dart';
+import '../config/locator.dart';
 
 class ComprehensiveCMMSService {
-  factory ComprehensiveCMMSService() => _instance;
-  ComprehensiveCMMSService._internal();
-  static final ComprehensiveCMMSService _instance =
-      ComprehensiveCMMSService._internal();
 
   // Core services
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
   final EnhancedNotificationService _notificationService =
-      EnhancedNotificationService();
-  final EscalationService _escalationService = EscalationService();
+      sl<EnhancedNotificationService>();
+  final EscalationService _escalationService = sl<EscalationService>();
   final SimplifiedReportingService _reportingService =
-      SimplifiedReportingService();
-  final EnhancedInventoryService _inventoryService = EnhancedInventoryService();
+      sl<SimplifiedReportingService>();
+  final EnhancedInventoryService _inventoryService = sl<EnhancedInventoryService>();
   final WorkflowAutomationService _automationService =
-      WorkflowAutomationService();
-  final AuditLoggingService _auditService = AuditLoggingService();
+      sl<WorkflowAutomationService>();
+  final AuditLoggingService _auditService = sl<AuditLoggingService>();
 
   bool _isInitialized = false;
+  StreamSubscription<EnhancedNotification>? _newNotificationSubscription;
 
   /// Initialize all services
   Future<void> initialize() async {
@@ -57,7 +55,7 @@ class ComprehensiveCMMSService {
       debugPrint(
         '✅ ComprehensiveCMMSService: All services initialized successfully',
       );
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ ComprehensiveCMMSService: Error initializing services: $e');
       rethrow;
     }
@@ -65,8 +63,9 @@ class ComprehensiveCMMSService {
 
   /// Set up integrations between services
   Future<void> _setupServiceIntegrations() async {
-    // Set up notification listeners
-    _notificationService.newNotificationStream.listen((notification) {
+    await _newNotificationSubscription?.cancel();
+    _newNotificationSubscription =
+        _notificationService.newNotificationStream.listen((notification) {
       _auditService.logEvent(
         type: AuditEventType.notificationSent,
         userId: notification.userId ?? 'system',
@@ -167,7 +166,7 @@ class ComprehensiveCMMSService {
       );
 
       return workOrderId;
-    } catch (e) {
+    } catch (e, st) {
       await _auditService.logError(
         userId: requestorId,
         error: 'Failed to create work order: $e',
@@ -222,7 +221,7 @@ class ComprehensiveCMMSService {
           'assignedBy': assignedBy,
         },
       );
-    } catch (e) {
+    } catch (e, st) {
       await _auditService.logError(
         userId: assignedBy,
         error: 'Failed to assign work order: $e',
@@ -295,7 +294,7 @@ class ComprehensiveCMMSService {
           'totalCost': (laborCost ?? 0) + (partsCost ?? 0),
         },
       );
-    } catch (e) {
+    } catch (e, st) {
       await _auditService.logError(
         userId: technicianId,
         error: 'Failed to complete work order: $e',
@@ -395,7 +394,7 @@ class ComprehensiveCMMSService {
       );
 
       return pmTaskId;
-    } catch (e) {
+    } catch (e, st) {
       await _auditService.logError(
         userId: createdBy ?? 'system',
         error: 'Failed to create PM task: $e',
@@ -446,7 +445,7 @@ class ComprehensiveCMMSService {
       );
 
       return requestId;
-    } catch (e) {
+    } catch (e, st) {
       await _auditService.logError(
         userId: requestedBy,
         error: 'Failed to create inventory request: $e',
@@ -493,7 +492,7 @@ class ComprehensiveCMMSService {
       );
 
       return reportData;
-    } catch (e) {
+    } catch (e, st) {
       await _auditService.logError(
         userId: 'system',
         error: 'Failed to generate report: $e',
@@ -553,13 +552,15 @@ class ComprehensiveCMMSService {
         'lastUpdated': DateTime.now().toIso8601String(),
       };
 
-  /// Dispose all services
-  void dispose() {
-    _notificationService.dispose();
-    _escalationService.dispose();
-    _inventoryService.dispose();
-    _automationService.dispose();
-    _auditService.dispose();
-    debugPrint('🧹 ComprehensiveCMMSService: All services disposed');
+  /// Cancels integration listeners without tearing down GetIt singletons.
+  Future<void> cancelIntegrationListeners() async {
+    await _newNotificationSubscription?.cancel();
+    _newNotificationSubscription = null;
+  }
+
+  /// Dispose integration listeners only. Registered services remain singletons.
+  Future<void> dispose() async {
+    await cancelIntegrationListeners();
+    debugPrint('🧹 ComprehensiveCMMSService: Integration listeners cancelled');
   }
 }

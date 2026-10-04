@@ -9,6 +9,7 @@ import '../../utils/app_theme.dart';
 import '../pm_tasks/pm_task_detail_screen.dart';
 import '../work_orders/create_work_request_screen.dart';
 import '../work_orders/work_order_detail_screen.dart';
+import '../../utils/user_facing_errors.dart';
 
 class AssetDetailScreen extends StatefulWidget {
   const AssetDetailScreen({
@@ -63,16 +64,18 @@ class _AssetDetailScreenState extends State<AssetDetailScreen>
       setState(() {
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading asset data: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load asset data. Please try again.',
+          stackTrace: st,
+          contextLabel: 'AssetDetail: load data',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     }

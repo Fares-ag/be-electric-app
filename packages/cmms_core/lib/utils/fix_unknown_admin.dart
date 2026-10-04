@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../config/release_safety.dart';
 import '../models/user.dart';
 import '../services/supabase_database_service.dart';
+import '../config/locator.dart';
 
 /// Quick utility to fix "Unknown User" admin accounts
 class FixUnknownAdmin {
   static Future<Map<String, dynamic>> fixAdminUser() async {
     try {
       // Load all users from Firestore
-      final users = await SupabaseDatabaseService.instance.getAllUsers();
+      final users = await sl<SupabaseDatabaseService>().getAllUsers();
 
       // Find "Unknown" admin users
       final unknownAdmins = users
@@ -42,11 +44,11 @@ class FixUnknownAdmin {
 
         // Save to Firestore
         try {
-          await SupabaseDatabaseService.instance.updateUser(
+          await sl<SupabaseDatabaseService>().updateUser(
             unknownAdmin.id,
             fixedAdmin,
           );
-        } catch (e) {
+        } catch (e, st) {
           print('⚠️ Firestore update failed (might not exist): $e');
         }
 
@@ -58,7 +60,7 @@ class FixUnknownAdmin {
         'message': 'Fixed $fixed admin account(s)',
         'count': fixed,
       };
-    } catch (e) {
+    } catch (e, st) {
       return {
         'success': false,
         'message': 'Error: $e',
@@ -67,6 +69,8 @@ class FixUnknownAdmin {
   }
 
   static Future<void> showFixDialog(BuildContext context) async {
+    if (!ReleaseSafety.showDevTools) return;
+
     showDialog(
       context: context,
       barrierDismissible: false,

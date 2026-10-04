@@ -5,6 +5,7 @@ import '../models/user.dart';
 import '../providers/auth_provider.dart';
 import '../providers/unified_data_provider.dart';
 import '../utils/app_theme.dart';
+import '../utils/user_facing_errors.dart';
 
 class TechnicianAssignmentDialog extends StatefulWidget {
   const TechnicianAssignmentDialog({
@@ -72,14 +73,16 @@ class _TechnicianAssignmentDialogState
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading technicians: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading technicians: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load technicians. Please try again.',
+          stackTrace: st,
+          contextLabel: 'TechnicianAssignment: load',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {
@@ -129,13 +132,15 @@ class _TechnicianAssignmentDialogState
         );
         Navigator.of(context).pop(true); // Return true to indicate success
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating technicians: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not update technicians. Please try again.',
+          stackTrace: st,
+          contextLabel: 'TechnicianAssignment: update',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {
@@ -179,13 +184,15 @@ class _TechnicianAssignmentDialogState
         );
         Navigator.of(context).pop(true); // Return true to indicate success
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error unassigning technician: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not unassign technician. Please try again.',
+          stackTrace: st,
+          contextLabel: 'technician_assignment_dialog: Could not unassign technician.',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {

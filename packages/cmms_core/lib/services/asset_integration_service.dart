@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,11 +7,7 @@ import '../config/api_config.dart';
 import '../models/asset.dart';
 
 class AssetIntegrationService {
-  factory AssetIntegrationService() => _instance;
-  AssetIntegrationService._internal();
-  // Singleton pattern
-  static final AssetIntegrationService _instance =
-      AssetIntegrationService._internal();
+  AssetIntegrationService();
 
   /// Get the base URL for the Asset Management System
   String get baseUrl => ApiConfig.assetManagementBaseUrl;
@@ -80,7 +76,7 @@ class AssetIntegrationService {
 
       print('ðŸ” No asset found for QR code: $qrCode');
       return null;
-    } catch (e) {
+    } catch (e, st) {
       print('Error fetching asset by QR code: $e');
       return null;
     }
@@ -103,7 +99,7 @@ class AssetIntegrationService {
       }
 
       return asset;
-    } catch (e) {
+    } catch (e, st) {
       print('Error fetching asset by ID: $e');
       return null;
     }
@@ -132,7 +128,7 @@ class AssetIntegrationService {
       }
 
       return [];
-    } catch (e) {
+    } catch (e, st) {
       print('Error searching assets: $e');
       return [];
     }
@@ -155,7 +151,7 @@ class AssetIntegrationService {
       print('ðŸ” Health check body: ${response.body}');
 
       return response.statusCode == 200;
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Connection test failed: $e');
       return false;
     }
@@ -225,7 +221,7 @@ class AssetIntegrationService {
             try {
               final asset = Asset.fromJson(assetsData[i]);
               allAssets.add(asset);
-            } catch (e) {
+            } catch (e, st) {
               print('ðŸ” Error parsing asset ${offset + i}: $e');
               if (i < 3) {
                 // Only print first 3 errors to avoid spam
@@ -273,7 +269,7 @@ class AssetIntegrationService {
 
       print('ðŸ” Successfully fetched ${allAssets.length} total assets');
       return allAssets;
-    } catch (e) {
+    } catch (e, st) {
       print('Error fetching all assets: $e');
       return [];
     }
@@ -290,7 +286,7 @@ class AssetIntegrationService {
                 asset.location.toLowerCase().contains(location.toLowerCase()),
           )
           .toList();
-    } catch (e) {
+    } catch (e, st) {
       print('Error fetching assets by location: $e');
       return [];
     }
@@ -312,7 +308,7 @@ class AssetIntegrationService {
       }
 
       return [];
-    } catch (e) {
+    } catch (e, st) {
       print('Error fetching assets by department: $e');
       return [];
     }
@@ -338,7 +334,7 @@ class AssetIntegrationService {
       }
 
       return [];
-    } catch (e) {
+    } catch (e, st) {
       print('Error fetching vehicle assets: $e');
       return [];
     }
@@ -366,7 +362,7 @@ class AssetIntegrationService {
       }
 
       return [];
-    } catch (e) {
+    } catch (e, st) {
       print('Error fetching maintenance history: $e');
       return [];
     }
@@ -388,7 +384,7 @@ class AssetIntegrationService {
       );
 
       return response.statusCode == 200;
-    } catch (e) {
+    } catch (e, st) {
       print('Error creating maintenance record: $e');
       return false;
     }
@@ -409,7 +405,7 @@ class AssetIntegrationService {
       );
 
       return response.statusCode == 200;
-    } catch (e) {
+    } catch (e, st) {
       print('Error updating asset maintenance: $e');
       return false;
     }
@@ -427,7 +423,7 @@ class AssetIntegrationService {
       );
 
       return response.statusCode == 200;
-    } catch (e) {
+    } catch (e, st) {
       print('Error updating asset condition: $e');
       return false;
     }
@@ -445,7 +441,7 @@ class AssetIntegrationService {
       );
 
       return response.statusCode == 200;
-    } catch (e) {
+    } catch (e, st) {
       print('Error updating asset location: $e');
       return false;
     }
@@ -493,7 +489,7 @@ class AssetIntegrationService {
       };
 
       await prefs.setString(ApiConfig.cacheKey, json.encode(cacheMap));
-    } catch (e) {
+    } catch (e, st) {
       print('Error caching asset: $e');
     }
   }
@@ -521,7 +517,7 @@ class AssetIntegrationService {
       }
 
       return null;
-    } catch (e) {
+    } catch (e, st) {
       print('Error getting cached asset: $e');
       return null;
     }
@@ -532,7 +528,7 @@ class AssetIntegrationService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(ApiConfig.cacheKey);
-    } catch (e) {
+    } catch (e, st) {
       print('Error clearing cache: $e');
     }
   }
@@ -563,7 +559,7 @@ class AssetIntegrationService {
         'expiredEntries': expiredEntries,
         'cacheSize': cache.length,
       };
-    } catch (e) {
+    } catch (e, st) {
       print('Error getting cache stats: $e');
       return {};
     }

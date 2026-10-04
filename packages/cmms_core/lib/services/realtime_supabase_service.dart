@@ -14,6 +14,7 @@ import '../models/user.dart' as app_user;
 import '../models/work_order.dart';
 import '../models/workflow_models.dart';
 import 'supabase_database_service.dart';
+import '../config/locator.dart';
 
 /// Describes a single incremental change to a work order row.
 enum WorkOrderChangeType { insert, update, delete }
@@ -30,13 +31,9 @@ class WorkOrderChangeEvent {
 }
 
 class RealtimeSupabaseService {
-  RealtimeSupabaseService._();
-  static RealtimeSupabaseService? _instance;
-  static RealtimeSupabaseService get instance =>
-      _instance ??= RealtimeSupabaseService._();
 
   final SupabaseClient _client = Supabase.instance.client;
-  final SupabaseDatabaseService _dbService = SupabaseDatabaseService.instance;
+  final SupabaseDatabaseService _dbService = sl<SupabaseDatabaseService>();
 
   // Stream controllers for managing subscriptions
   final Map<String, StreamSubscription<dynamic>> _subscriptions = {};
@@ -52,7 +49,7 @@ class RealtimeSupabaseService {
       debugPrint('RealtimeSupabase: Initializing real-time listeners...');
       // Supabase handles offline persistence automatically
       debugPrint('RealtimeSupabase: Initialized successfully');
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('RealtimeSupabase: Initialization error: $e');
     }
   }
@@ -112,7 +109,7 @@ class RealtimeSupabaseService {
                     : WorkOrderChangeType.update,
                 workOrder: wo,
               ));
-            } catch (e) {
+            } catch (e, st) {
               debugPrint('⚠️ WorkOrderChangeEvent parse error: $e');
             }
           },
@@ -237,7 +234,7 @@ class RealtimeSupabaseService {
           final normalizedId = doc['id'] ?? '';
           data['id'] = normalizedId;
           return WorkOrder.fromMap(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing work order ${doc['id']}: $e');
           return null;
         }
@@ -268,7 +265,7 @@ class RealtimeSupabaseService {
               final normalizedId = doc['id'] ?? '';
               data['id'] = normalizedId;
               return WorkOrder.fromMap(data);
-            } on Exception catch (e) {
+            } on Exception catch (e, st) {
           debugPrint('Error parsing work order ${doc['id']}: $e');
               return null;
             }
@@ -296,7 +293,7 @@ class RealtimeSupabaseService {
         final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
         data['id'] = workOrderId;
         return WorkOrder.fromMap(data);
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         debugPrint('Error parsing work order $workOrderId: $e');
         return null;
       }
@@ -321,7 +318,7 @@ class RealtimeSupabaseService {
           final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
           data['id'] = doc['id'];
           return PMTask.fromMap(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing PM task ${doc['id']}: $e');
           return null;
         }
@@ -347,7 +344,7 @@ class RealtimeSupabaseService {
               final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
               data['id'] = doc['id'];
               return PMTask.fromMap(data);
-            } on Exception catch (e) {
+            } on Exception catch (e, st) {
           debugPrint('Error parsing PM task ${doc['id']}: $e');
               return null;
             }
@@ -375,7 +372,7 @@ class RealtimeSupabaseService {
         final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
         data['id'] = pmTaskId;
         return PMTask.fromMap(data);
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         debugPrint('Error parsing PM task $pmTaskId: $e');
         return null;
       }
@@ -415,7 +412,7 @@ class RealtimeSupabaseService {
           final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
           data['id'] = doc['id'];
           return Asset.fromMap(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing asset ${doc['id']}: $e');
           return null;
         }
@@ -438,7 +435,7 @@ class RealtimeSupabaseService {
         final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
         data['id'] = assetId;
         return Asset.fromMap(data);
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         debugPrint('Error parsing asset $assetId: $e');
         return null;
       }
@@ -462,7 +459,7 @@ class RealtimeSupabaseService {
           final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
           data['id'] = doc['id'];
           return InventoryItem.fromMap(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing inventory item ${doc['id']}: $e');
           return null;
         }
@@ -487,7 +484,7 @@ class RealtimeSupabaseService {
           final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
           data['id'] = doc['id'];
           return app_user.User.fromMap(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing user ${doc['id']}: $e');
           return null;
         }
@@ -516,7 +513,7 @@ class RealtimeSupabaseService {
           final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
           data['id'] = doc['id'];
           return PartsRequest.fromMap(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing parts request ${doc['id']}: $e');
           return null;
         }
@@ -545,7 +542,7 @@ class RealtimeSupabaseService {
           final data = _dbService.convertFromSupabaseMap(Map<String, dynamic>.from(doc));
           data['id'] = doc['id'];
           return PurchaseOrder.fromMap(data);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing purchase order ${doc['id']}: $e');
           return null;
         }
@@ -572,7 +569,7 @@ class RealtimeSupabaseService {
       return snapshot.map((doc) {
         try {
           return Workflow.fromJson(doc);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing workflow ${doc['id']}: $e');
           return null;
         }
@@ -592,7 +589,7 @@ class RealtimeSupabaseService {
       if (snapshot.isEmpty) return null;
       try {
         return Workflow.fromJson(snapshot.first);
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         debugPrint('Error parsing workflow $workflowId: $e');
         return null;
       }
@@ -615,7 +612,7 @@ class RealtimeSupabaseService {
       return snapshot.map((doc) {
         try {
           return Workflow.fromJson(doc);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing workflow ${doc['id']}: $e');
           return null;
         }
@@ -644,7 +641,7 @@ class RealtimeSupabaseService {
       return snapshot.map((doc) {
         try {
           return Workflow.fromJson(doc);
-        } on Exception catch (e) {
+        } on Exception catch (e, st) {
           debugPrint('Error parsing workflow ${doc['id']}: $e');
           return null;
         }

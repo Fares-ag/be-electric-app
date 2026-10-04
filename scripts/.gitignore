@@ -4,5 +4,9 @@ defines.production.json
 # Database CLI credentials
 db.env
 
+# App Store Connect API credentials
+asc.env
+
 # Database CLI dependencies (run npm install in scripts/db-cli)
 db-cli/node_modules/
+node_modules/

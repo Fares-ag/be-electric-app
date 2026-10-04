@@ -6,6 +6,7 @@ import 'package:cmms_core/screens/workflows/create_workflow_screen.dart';
 import 'package:cmms_core/screens/workflows/workflow_detail_screen.dart';
 import 'package:cmms_core/services/workflow_service.dart';
 import 'package:cmms_core/utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 class WorkflowListScreen extends StatefulWidget {
   const WorkflowListScreen({super.key});
@@ -49,16 +50,18 @@ class _WorkflowListScreenState extends State<WorkflowListScreen>
         _filteredWorkflows = workflows;
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading workflows: $e'),
-            backgroundColor: AppTheme.red,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load workflows. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkflowList: load',
+          backgroundColor: AppTheme.red,
         );
       }
     }

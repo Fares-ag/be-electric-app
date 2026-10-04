@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app/cmms_app_mode_scope.dart';
 import '../config/cmms_app_mode.dart';
+import '../config/locator.dart';
 import '../services/notification_service.dart' as notification_service;
 import '../utils/app_theme.dart';
 import '../utils/requestor_home_navigation.dart';
@@ -17,7 +18,7 @@ class NotificationListScreen extends StatefulWidget {
 
 class _NotificationListScreenState extends State<NotificationListScreen> {
   final notification_service.NotificationService _notificationService =
-      notification_service.NotificationService();
+      sl<notification_service.NotificationService>();
 
   @override
   Widget build(BuildContext context) => Scaffold(

@@ -11,9 +11,11 @@ import '../../models/work_order.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
 import '../../services/activity_log_service.dart';
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../services/work_order_completion_report_service.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/charger_asset_filter.dart';
+import '../../utils/work_order_duration.dart';
 import '../../widgets/activity_history_timeline.dart';
 import '../../widgets/authenticated_image.dart';
 import '../../widgets/pause_reason_dialog.dart';
@@ -22,6 +24,9 @@ import '../../widgets/technician_assignment_dialog.dart';
 import '../../widgets/work_timer.dart';
 import '../requestor/edit_request_screen.dart';
 import 'work_order_completion_screen.dart';
+import '../../config/locator.dart';
+import '../../utils/offline_service_access.dart';
+import '../../utils/user_facing_errors.dart';
 
 class WorkOrderDetailScreen extends StatefulWidget {
   const WorkOrderDetailScreen({
@@ -37,7 +42,7 @@ class WorkOrderDetailScreen extends StatefulWidget {
 class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
   bool _isLoading = false;
   late WorkOrder _currentWorkOrder;
-  final ActivityLogService _activityLogService = ActivityLogService();
+  final ActivityLogService _activityLogService = sl<ActivityLogService>();
   String? _companyName;
   bool _isLoadingCompany = false;
 
@@ -56,7 +61,20 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
   /// in-memory realtime cache can briefly miss `metadata` merges.
   Future<void> _hydrateWorkOrderFromServerThenProvider() async {
     try {
-      final fresh = await SupabaseDatabaseService.instance
+      if (await resolveOfflineQueueService()
+          .hasPendingMutationForWorkOrder(_currentWorkOrder.id)) {
+        debugPrint(
+          'WorkOrderDetail: Skipping server hydrate for ${_currentWorkOrder.id} '
+          '— pending offline mutation',
+        );
+        if (mounted) {
+          _refreshWorkOrderFromProvider();
+          _loadCompanyName();
+        }
+        return;
+      }
+
+      final fresh = await CmmsRepositories.workOrders
           .getWorkOrder(_currentWorkOrder.id);
       if (!mounted) return;
 
@@ -129,9 +147,8 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
     });
 
     try {
-      final supabaseService = SupabaseDatabaseService.instance;
       final company =
-          await supabaseService.getCompanyById(_currentWorkOrder.companyId!);
+          await CmmsRepositories.users.getCompanyById(_currentWorkOrder.companyId!);
 
       if (mounted) {
         setState(() {
@@ -139,7 +156,7 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
           _isLoadingCompany = false;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading company name: $e');
       if (mounted) {
         setState(() {
@@ -157,10 +174,23 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
   void _refreshWorkOrderFromProvider() {
     final unifiedProvider =
         Provider.of<UnifiedDataProvider>(context, listen: false);
-    final cached = unifiedProvider.workOrders.firstWhere(
+    var cached = unifiedProvider.workOrders.firstWhere(
       (wo) => wo.id == _currentWorkOrder.id,
       orElse: () => _currentWorkOrder,
     );
+
+    if (_currentWorkOrder.isPaused && !cached.isPaused) {
+      cached = cached.copyWith(
+        isPaused: true,
+        pausedAt: _currentWorkOrder.pausedAt,
+        pauseReason: _currentWorkOrder.pauseReason,
+        pauseHistory: _currentWorkOrder.pauseHistory,
+      );
+    }
+
+    if (_currentWorkOrder.isCompleted && !cached.isCompleted) {
+      cached = _currentWorkOrder;
+    }
 
     if (cached.isCompleted) {
       debugPrint(
@@ -183,7 +213,7 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
             _currentWorkOrder = _currentWorkOrder.copyWith(asset: asset);
           });
         }
-      } catch (e) {
+      } catch (e, st) {
         debugPrint(
           '⚠️ Asset ${_currentWorkOrder.assetId} not found in provider assets',
         );
@@ -278,13 +308,15 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
           _currentWorkOrder = updatedWorkOrder;
         });
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error starting work: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not start work. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkOrderDetail: start work',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {
@@ -341,14 +373,16 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
             ),
           );
         }
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error pausing work: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not pause work. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkOrderDetail: pause work',
+          backgroundColor: AppTheme.errorColor,
+        );
           setState(() => _isLoading = false);
         }
       }
@@ -392,13 +426,15 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
           ),
         );
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error resuming work: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not resume work. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkOrderDetail: resume work',
+          backgroundColor: AppTheme.errorColor,
         );
         setState(() => _isLoading = false);
       }
@@ -692,6 +728,11 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
                               _currentWorkOrder.assetName ??
                               'General Maintenance (No Asset)',
                         ),
+                      if (_resolveChargerManufacturerLabel() != null)
+                        _buildInfoRow(
+                          'Manufacturer',
+                          _resolveChargerManufacturerLabel()!,
+                        ),
                       // Only show Location if it has a value
                       if (_getWorkOrderLocation(_currentWorkOrder) != null)
                         _buildInfoRow(
@@ -849,27 +890,33 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
                                   _currentWorkOrder.completedAt != null)
                                 _buildCompletionRow(
                                   'Total Duration',
-                                  _formatDuration(
-                                    _currentWorkOrder.completedAt!.difference(
-                                        _currentWorkOrder.startedAt!),
+                                  formatWorkDurationSeconds(
+                                    calculateWorkDurationSeconds(
+                                          _currentWorkOrder,
+                                        ) ??
+                                        0,
                                   ),
                                   Icons.timer_outlined,
                                 ),
                               if (_currentWorkOrder.startedAt != null)
                                 _buildCompletionRow(
                                   'Time to Start',
-                                  _formatDuration(
-                                    _currentWorkOrder.startedAt!.difference(
-                                        _currentWorkOrder.createdAt),
+                                  formatWorkDurationSeconds(
+                                    elapsedSecondsBetween(
+                                      _currentWorkOrder.createdAt,
+                                      _currentWorkOrder.startedAt!,
+                                    ),
                                   ),
                                   Icons.schedule,
                                 ),
                               if (_currentWorkOrder.completedAt != null)
                                 _buildCompletionRow(
                                   'Total Time',
-                                  _formatDuration(
-                                    _currentWorkOrder.completedAt!.difference(
-                                        _currentWorkOrder.createdAt),
+                                  formatWorkDurationSeconds(
+                                    elapsedSecondsBetween(
+                                      _currentWorkOrder.createdAt,
+                                      _currentWorkOrder.completedAt!,
+                                    ),
                                   ),
                                   Icons.access_time,
                                 ),
@@ -1124,8 +1171,12 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
                                   'No reason provided';
                               final duration =
                                   pausedAt != null && resumedAt != null
-                                      ? _formatDuration(
-                                          resumedAt.difference(pausedAt))
+                                      ? formatWorkDurationSeconds(
+                                          elapsedSecondsBetween(
+                                            pausedAt,
+                                            resumedAt,
+                                          ),
+                                        )
                                       : 'Ongoing';
                               final index = _currentWorkOrder.pauseHistory!
                                   .indexOf(pause);
@@ -1543,6 +1594,13 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
         ),
       );
 
+  String? _resolveChargerManufacturerLabel() {
+    if (_currentWorkOrder.asset == null) {
+      return null;
+    }
+    return resolveWorkOrderChargerManufacturer(_currentWorkOrder);
+  }
+
   String _formatDate(DateTime date) =>
       '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
 
@@ -1567,20 +1625,6 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
     }
     // For 3+ technicians, show first two and count of others
     return '${technicians[0].name}, ${technicians[1].name} +${technicians.length - 2}';
-  }
-
-  String _formatDuration(Duration duration) {
-    final days = duration.inDays;
-    final hours = duration.inHours.remainder(24);
-    final minutes = duration.inMinutes.remainder(60);
-
-    final parts = <String>[];
-    if (days > 0) parts.add('$days day${days != 1 ? 's' : ''}');
-    if (hours > 0) parts.add('$hours hour${hours != 1 ? 's' : ''}');
-    if (minutes > 0 || parts.isEmpty)
-      parts.add('$minutes minute${minutes != 1 ? 's' : ''}');
-
-    return parts.join(', ');
   }
 
   Widget _buildCompletionSection(String title, List<Widget> children) => Column(
@@ -1798,7 +1842,7 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
         // Refresh work order to get latest data
         _refreshWorkOrderFromProvider();
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       setState(() {
         _isLoading = false;
       });
@@ -1904,18 +1948,20 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
             ),
           );
         }
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         setState(() {
           _isLoading = false;
         });
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error cancelling work order: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not cancel work order. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkOrderDetail: cancel work order',
+          backgroundColor: AppTheme.errorColor,
+        );
         }
       }
     }
@@ -2012,14 +2058,16 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
             _currentWorkOrder = updatedWorkOrder;
           });
         }
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error unassigning technician: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not unassign technician. Please try again.',
+          stackTrace: st,
+          contextLabel: 'work_order_detail_screen: Could not unassign technician.',
+          backgroundColor: AppTheme.errorColor,
+        );
         }
       }
     }
@@ -2348,14 +2396,16 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
                         ),
                       );
                     }
-                  } catch (e) {
+                  } catch (e, st) {
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Error opening file: $e'),
-                          backgroundColor: AppTheme.errorColor,
-                        ),
-                      );
+                      showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not open file. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkOrderDetail: open file',
+          backgroundColor: AppTheme.errorColor,
+        );
                     }
                   }
                 },
@@ -2365,7 +2415,7 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
           );
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error generating completion report: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2435,18 +2485,20 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
             ),
           );
         }
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         setState(() {
           _isLoading = false;
         });
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error updating work order: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not update work order. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkOrderDetail: update work order',
+          backgroundColor: AppTheme.errorColor,
+        );
         }
       }
     }
@@ -2503,18 +2555,20 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
             ),
           );
         }
-      } on Exception catch (e) {
+      } on Exception catch (e, st) {
         setState(() {
           _isLoading = false;
         });
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error deleting work order: $e'),
-              backgroundColor: AppTheme.errorColor,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not delete work order. Please try again.',
+          stackTrace: st,
+          contextLabel: 'WorkOrderDetail: delete work order',
+          backgroundColor: AppTheme.errorColor,
+        );
         }
       }
     }
@@ -2611,13 +2665,15 @@ class _WorkOrderDetailScreenState extends State<WorkOrderDetailScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error reassigning technician: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not reassign technician. Please try again.',
+          stackTrace: st,
+          contextLabel: 'work_order_detail_screen: Could not reassign technician.',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     }

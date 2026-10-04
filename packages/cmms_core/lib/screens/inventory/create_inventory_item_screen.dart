@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../providers/inventory_provider.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CreateInventoryItemScreen extends StatefulWidget {
   const CreateInventoryItemScreen({super.key});
@@ -146,13 +147,15 @@ class _CreateInventoryItemScreenState extends State<CreateInventoryItemScreen> {
         );
         Navigator.pop(context, true);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating inventory item: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not create inventory item. Please try again.',
+          stackTrace: st,
+          contextLabel: 'CreateInventoryItem: create',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {

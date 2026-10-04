@@ -4,10 +4,6 @@ import '../models/asset.dart';
 
 /// Service for direct database access to Asset Management System
 class AssetDatabaseService {
-  factory AssetDatabaseService() => _instance;
-  AssetDatabaseService._internal();
-  static final AssetDatabaseService _instance =
-      AssetDatabaseService._internal();
 
   // Database configuration
   String? _host;
@@ -53,7 +49,7 @@ class AssetDatabaseService {
 
       _isConfigured = _host != null && _port != null && _database != null;
       print('ðŸ—„ï¸ Database config loaded: $_isConfigured');
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Error loading database config: $e');
       _isConfigured = false;
     }
@@ -71,7 +67,7 @@ class AssetDatabaseService {
       if (_connectionString != null) {
         await prefs.setString('db_connection_string', _connectionString!);
       }
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Error saving database config: $e');
     }
   }
@@ -102,7 +98,7 @@ class AssetDatabaseService {
 
       print('âœ… Database connection successful');
       return true;
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Database connection failed: $e');
       return false;
     }
@@ -147,7 +143,7 @@ class AssetDatabaseService {
 
       print('âŒ Asset not found in database');
       return null;
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Database query error: $e');
       return null;
     }
@@ -189,7 +185,7 @@ class AssetDatabaseService {
       }
 
       return [];
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Database search error: $e');
       return [];
     }
@@ -236,7 +232,7 @@ class AssetDatabaseService {
 
       print('âœ… Retrieved ${assets.length} assets from database');
       return assets;
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Database get all assets error: $e');
       return [];
     }
@@ -273,7 +269,7 @@ class AssetDatabaseService {
       _isConfigured = false;
 
       print('ðŸ—‘ï¸ Database configuration cleared');
-    } catch (e) {
+    } catch (e, st) {
       print('âŒ Error clearing database config: $e');
     }
   }

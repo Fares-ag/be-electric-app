@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'supabase_database_service.dart';
+import '../config/locator.dart';
 
 enum AuditEventType {
   userLogin,
@@ -132,9 +133,6 @@ class AuditEvent {
 }
 
 class AuditLoggingService {
-  factory AuditLoggingService() => _instance;
-  AuditLoggingService._internal();
-  static final AuditLoggingService _instance = AuditLoggingService._internal();
 
   final List<AuditEvent> _events = [];
   final StreamController<AuditEvent> _eventController =
@@ -142,7 +140,7 @@ class AuditLoggingService {
   Timer? _cleanupTimer;
   bool _isInitialized = false;
   final SupabaseDatabaseService _databaseService =
-      SupabaseDatabaseService.instance;
+      sl<SupabaseDatabaseService>();
 
   List<AuditEvent> get events => List.unmodifiable(_events);
   Stream<AuditEvent> get eventStream => _eventController.stream;
@@ -169,7 +167,7 @@ class AuditLoggingService {
         debugPrint(
           'âœ… AuditLoggingService: Loaded ${_events.length} events from Firestore',
         );
-      } catch (e) {
+      } catch (e, st) {
         debugPrint(
           'âš ï¸ AuditLoggingService: Firestore unavailable, loading from local storage: $e',
         );
@@ -182,14 +180,14 @@ class AuditLoggingService {
           try {
             final event = AuditEvent.fromMap(jsonDecode(json));
             _events.add(event);
-          } catch (e) {
+          } catch (e, st) {
             debugPrint('Error loading audit event: $e');
           }
         }
       }
 
       _events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ AuditLoggingService: Error loading audit events: $e');
     }
   }
@@ -201,7 +199,7 @@ class AuditLoggingService {
       try {
         await _databaseService.saveAuditEvent(_events.last);
         debugPrint('âœ… AuditLoggingService: Saved event to Firestore');
-      } catch (e) {
+      } catch (e, st) {
         debugPrint(
           'âš ï¸ AuditLoggingService: Firestore save failed, using local storage: $e',
         );
@@ -211,7 +209,7 @@ class AuditLoggingService {
       final prefs = await SharedPreferences.getInstance();
       final eventsJson = _events.map((e) => jsonEncode(e.toMap())).toList();
       await prefs.setStringList('audit_events', eventsJson);
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ AuditLoggingService: Error saving audit events: $e');
     }
   }

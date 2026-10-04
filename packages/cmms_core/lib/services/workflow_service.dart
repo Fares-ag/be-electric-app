@@ -269,7 +269,7 @@ class WorkflowService {
     final workflows = await getAllWorkflows();
     try {
       return workflows.firstWhere((w) => w.id == workflowId);
-    } catch (e) {
+    } catch (e, st) {
       return null;
     }
   }
@@ -423,7 +423,7 @@ class WorkflowService {
     final templates = await getWorkflowTemplates();
     try {
       return templates.firstWhere((t) => t.id == templateId);
-    } catch (e) {
+    } catch (e, st) {
       return null;
     }
   }

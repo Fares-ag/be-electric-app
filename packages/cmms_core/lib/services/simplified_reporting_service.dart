@@ -13,6 +13,7 @@ import '../models/user.dart';
 import '../models/user_role.dart';
 import '../models/work_order.dart';
 import 'unified_data_service.dart';
+import '../config/locator.dart';
 
 enum ReportType {
   workOrderSummary,
@@ -93,12 +94,8 @@ class ReportData {
 }
 
 class SimplifiedReportingService {
-  factory SimplifiedReportingService() => _instance;
-  SimplifiedReportingService._internal();
-  static final SimplifiedReportingService _instance =
-      SimplifiedReportingService._internal();
 
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
   final List<ReportData> _generatedReports = [];
 
   List<ReportData> get generatedReports => List.unmodifiable(_generatedReports);
@@ -147,7 +144,7 @@ class SimplifiedReportingService {
 
       _generatedReports.add(finalReportData);
       return finalReportData;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('❌ SimplifiedReportingService: Error generating report: $e');
       rethrow;
     }

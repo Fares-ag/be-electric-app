@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 import '../../config/service_locator.dart';
 import '../../models/analytics_models.dart';
 import '../../services/analytics/analytics_service.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -34,16 +35,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         _notifications = notifications;
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _isLoading = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading notifications: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load notifications. Please try again.',
+          stackTrace: st,
+          contextLabel: 'Notifications: load',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     }
@@ -336,52 +339,5 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } else {
       return 'Just now';
     }
-  }
-}
-
-class NotificationBadge extends StatelessWidget {
-  const NotificationBadge({
-    required this.child,
-    super.key,
-    this.count,
-  });
-  final Widget child;
-  final int? count;
-
-  @override
-  Widget build(BuildContext context) {
-    if (count == null || count == 0) {
-      return child;
-    }
-
-    return Stack(
-      children: [
-        child,
-        Positioned(
-          right: 0,
-          top: 0,
-          child: Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              color: Colors.red,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            constraints: const BoxConstraints(
-              minWidth: 16,
-              minHeight: 16,
-            ),
-            child: Text(
-              count! > 99 ? '99+' : count.toString(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-      ],
-    );
   }
 }

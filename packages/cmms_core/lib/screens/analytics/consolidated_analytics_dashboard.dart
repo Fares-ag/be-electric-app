@@ -27,6 +27,7 @@ import '../../utils/chart_theme.dart';
 import '../../utils/responsive_layout.dart';
 import '../pm_tasks/pm_task_list_screen.dart';
 import '../work_orders/work_order_list_screen.dart';
+import '../../config/locator.dart';
 
 class ConsolidatedAnalyticsDashboard extends StatefulWidget {
   const ConsolidatedAnalyticsDashboard({
@@ -48,7 +49,7 @@ class ConsolidatedAnalyticsDashboard extends StatefulWidget {
 class _ConsolidatedAnalyticsDashboardState
     extends State<ConsolidatedAnalyticsDashboard> {
   final AnalyticsService _analyticsService = AnalyticsService();
-  final RealtimeAnalyticsService _realtime = RealtimeAnalyticsService.instance;
+  final RealtimeAnalyticsService _realtime = sl<RealtimeAnalyticsService>();
   final AnalyticsCalculator _calculator = AnalyticsCalculator();
 
   String _periodKey = '30d';
@@ -183,7 +184,7 @@ class _ConsolidatedAnalyticsDashboardState
         _periodPmTasks = periodPmTasks;
         _userNameCache = userMap;
       });
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('Dashboard: load KPIs error $e');
       if (!mounted) return;
       setState(() => _loading = false);
@@ -192,7 +193,7 @@ class _ConsolidatedAnalyticsDashboardState
 
   @override
   void dispose() {
-    _realtime.dispose();
+    _realtime.stopListening();
     super.dispose();
   }
 
@@ -2020,7 +2021,7 @@ class _ConsolidatedAnalyticsDashboardState
       context: context,
       isScrollControlled: true,
       builder: (context) => FutureBuilder<List<WorkOrder>>(
-        future: UnifiedDataService.instance.queryWorkOrders(
+        future: sl<UnifiedDataService>().queryWorkOrders(
           status: status,
           priority: priority,
           assignedTechnicianId: _filterTechnicianId,
@@ -2122,7 +2123,7 @@ class _ConsolidatedAnalyticsDashboardState
       context: context,
       isScrollControlled: true,
       builder: (context) => FutureBuilder<List<PMTask>>(
-        future: UnifiedDataService.instance.queryPMTasks(
+        future: sl<UnifiedDataService>().queryPMTasks(
           status: status,
           assignedTechnicianId: _filterTechnicianId,
           startDate: start,

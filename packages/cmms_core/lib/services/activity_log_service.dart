@@ -8,9 +8,6 @@ import 'package:uuid/uuid.dart';
 import '../models/activity_log.dart';
 
 class ActivityLogService {
-  factory ActivityLogService() => _instance;
-  ActivityLogService._internal();
-  static final ActivityLogService _instance = ActivityLogService._internal();
 
   static const String _storageKey = 'activity_logs';
   final List<ActivityLog> _activityLogs = [];
@@ -24,7 +21,7 @@ class ActivityLogService {
       await _loadActivityLogs();
       _isInitialized = true;
       debugPrint('âœ… ActivityLogService: Initialized successfully');
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ ActivityLogService: Error initializing: $e');
     }
   }
@@ -46,7 +43,7 @@ class ActivityLogService {
           'ðŸ“– ActivityLogService: Loaded ${_activityLogs.length} activity logs',
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ ActivityLogService: Error loading activity logs: $e');
     }
   }
@@ -59,7 +56,7 @@ class ActivityLogService {
         _activityLogs.map((log) => log.toMap()).toList(),
       );
       await prefs.setString(_storageKey, logsJson);
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ ActivityLogService: Error saving activity logs: $e');
     }
   }
@@ -97,7 +94,7 @@ class ActivityLogService {
       debugPrint(
         'ðŸ“ ActivityLogService: Logged activity - ${log.activityType.name} for $entityType $entityId',
       );
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('âŒ ActivityLogService: Error logging activity: $e');
     }
   }

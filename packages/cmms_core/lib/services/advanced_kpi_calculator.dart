@@ -51,7 +51,7 @@ class AdvancedKPICalculator {
         '📊 Advanced KPI: MTTR calculated from ${filteredTimes.length} valid work orders',
       );
       return meanMinutes / 60.0; // Convert to hours
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating MTTR: $e');
       return 0;
     }
@@ -105,7 +105,7 @@ class AdvancedKPICalculator {
 
       print('📊 Advanced KPI: Calculated MTBF for ${assetMTBF.length} assets');
       return assetMTBF;
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating asset MTBF: $e');
       return {};
     }
@@ -153,7 +153,7 @@ class AdvancedKPICalculator {
       final uptime = totalTime - totalDowntime;
 
       return (uptime.inMinutes / totalTime.inMinutes * 100).clamp(0.0, 100.0);
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating asset uptime for $assetId: $e');
       return 0;
     }
@@ -198,7 +198,7 @@ class AdvancedKPICalculator {
           (qualityScore * 0.3);
 
       return (efficiency * 100).clamp(0.0, 100.0);
-    } catch (e) {
+    } catch (e, st) {
       print(
         '❌ Advanced KPI: Error calculating technician efficiency for $technicianId: $e',
       );
@@ -227,7 +227,7 @@ class AdvancedKPICalculator {
       final totalHours =
           filteredTimes.fold<double>(0, (sum, time) => sum + time);
       return totalHours / filteredTimes.length;
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating average response time: $e');
       return 0;
     }
@@ -290,7 +290,7 @@ class AdvancedKPICalculator {
         'costVariance': costVariance,
         'costTrend': costTrend,
       };
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating cost efficiency: $e');
       return {
         'averageCost': 0.0,
@@ -369,7 +369,7 @@ class AdvancedKPICalculator {
         'riskScore':
             (highRiskAssets.length / assets.length * 100).clamp(0.0, 100.0),
       };
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating predictive indicators: $e');
       return {
         'highRiskAssets': <String>[],
@@ -456,7 +456,7 @@ class AdvancedKPICalculator {
         averageTAT: averageTAT,
         complianceRate: complianceRate,
       );
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating comprehensive KPIs: $e');
       return const KPIMetrics(
         mttr: 0,
@@ -495,7 +495,7 @@ class AdvancedKPICalculator {
       }
 
       return totalTAT / completedWorkOrders.length;
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating average TAT: $e');
       return 0;
     }
@@ -527,7 +527,7 @@ class AdvancedKPICalculator {
       }
 
       return (onTimeCount / completedWorkOrders.length) * 100;
-    } catch (e) {
+    } catch (e, st) {
       print('❌ Advanced KPI: Error calculating compliance rate: $e');
       return 0;
     }

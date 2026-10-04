@@ -6,6 +6,7 @@ import 'package:cmms_core/models/workflow_models.dart';
 import 'package:cmms_core/providers/auth_provider.dart';
 import 'package:cmms_core/providers/workflow_provider.dart';
 import 'package:cmms_core/utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CreateWorkflowScreen extends StatefulWidget {
   const CreateWorkflowScreen({super.key});
@@ -77,13 +78,15 @@ class _CreateWorkflowScreenState extends State<CreateWorkflowScreen> {
           throw Exception('Failed to create workflow');
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating workflow: $e'),
-            backgroundColor: AppTheme.red,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not create workflow. Please try again.',
+          stackTrace: st,
+          contextLabel: 'CreateWorkflow: create',
+          backgroundColor: AppTheme.red,
         );
       }
     } finally {

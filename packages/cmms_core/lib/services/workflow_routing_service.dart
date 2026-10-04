@@ -7,15 +7,12 @@ import 'package:flutter/foundation.dart';
 import '../models/user.dart';
 import '../models/workflow_models.dart';
 import 'unified_data_service.dart';
+import '../config/locator.dart';
 
 /// Service for routing workflows to appropriate users and managing approval chains
 class WorkflowRoutingService {
-  factory WorkflowRoutingService() => _instance;
-  WorkflowRoutingService._internal();
-  static final WorkflowRoutingService _instance =
-      WorkflowRoutingService._internal();
 
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
 
   /// Route workflow to appropriate approvers based on type and conditions
   Future<List<String>> routeWorkflow(Workflow workflow) async {
@@ -117,7 +114,7 @@ class WorkflowRoutingService {
             approvers.add(manager.id);
           }
         }
-      } catch (e) {
+      } catch (e, st) {
         // Work order not found, will default to all managers
         debugPrint('Work order $workOrderId not found: $e');
       }

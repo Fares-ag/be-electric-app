@@ -4,9 +4,6 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ServiceAccountAuth {
-  factory ServiceAccountAuth() => _instance;
-  ServiceAccountAuth._internal();
-  static final ServiceAccountAuth _instance = ServiceAccountAuth._internal();
 
   String? _serviceAccountKey;
   String? _cachedToken;
@@ -58,7 +55,7 @@ class ServiceAccountAuth {
       }
 
       return token;
-    } catch (e) {
+    } catch (e, st) {
       print('Error getting service account token: $e');
       return null;
     }
@@ -83,7 +80,7 @@ class ServiceAccountAuth {
 
       print('Service Account configured for: ${keyData['client_email']}');
       return customToken;
-    } catch (e) {
+    } catch (e, st) {
       print('Error generating JWT: $e');
       return null;
     }
@@ -112,7 +109,7 @@ class ServiceAccountAuth {
         );
         return null;
       }
-    } catch (e) {
+    } catch (e, st) {
       print('Error exchanging JWT for access token: $e');
       return null;
     }

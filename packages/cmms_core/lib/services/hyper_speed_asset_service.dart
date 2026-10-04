@@ -9,10 +9,6 @@ import '../models/asset.dart';
 import 'hyper_speed_cache.dart';
 
 class HyperSpeedAssetService {
-  factory HyperSpeedAssetService() => _instance;
-  HyperSpeedAssetService._internal();
-  static final HyperSpeedAssetService _instance =
-      HyperSpeedAssetService._internal();
 
   final HyperSpeedCache _cache = HyperSpeedCache();
 
@@ -122,7 +118,7 @@ class HyperSpeedAssetService {
 
               // Stop if we've reached the limit
               if (limit != null && allAssets.length >= limit) break;
-            } catch (e) {
+            } catch (e, st) {
               // Skip invalid assets for speed
               continue;
             }
@@ -144,7 +140,7 @@ class HyperSpeedAssetService {
 
       debugPrint('🚀 HYPER SPEED: Loaded ${allAssets.length} assets from API');
       return allAssets;
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('🚀 HYPER SPEED: API loading error: $e');
       return [];
     }
@@ -230,7 +226,7 @@ class HyperSpeedAssetService {
         );
         return assets;
       }
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       debugPrint('🚀 HYPER SPEED: API search error: $e');
     }
 
@@ -254,7 +250,7 @@ class HyperSpeedAssetService {
         debugPrint(
           '🚀 HYPER SPEED: Preloaded ${assets.length} assets in background',
         );
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('🚀 HYPER SPEED: Background preload error: $e');
       }
     });

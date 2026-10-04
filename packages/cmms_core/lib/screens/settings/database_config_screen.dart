@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/asset_database_service.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 class DatabaseConfigScreen extends StatefulWidget {
   const DatabaseConfigScreen({super.key});
@@ -60,7 +61,7 @@ class _DatabaseConfigScreenState extends State<DatabaseConfigScreen> {
             status['hasConnectionString'] == true ? '••••••••' : '';
         _connectionSuccessful = status['isConfigured'] == true;
       });
-    } catch (e) {
+    } catch (e, st) {
       print('Error loading configuration: $e');
     } finally {
       setState(() {
@@ -104,13 +105,15 @@ class _DatabaseConfigScreenState extends State<DatabaseConfigScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving configuration: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not save configuration. Please try again.',
+          stackTrace: st,
+          contextLabel: 'database_config_screen: Could not save configuration. ',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {
@@ -145,16 +148,18 @@ class _DatabaseConfigScreenState extends State<DatabaseConfigScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _connectionSuccessful = false;
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Connection test error: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Connection test failed. Please try again.',
+          stackTrace: st,
+          contextLabel: 'DatabaseConfig: connection test',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {
@@ -176,13 +181,15 @@ class _DatabaseConfigScreenState extends State<DatabaseConfigScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error clearing configuration: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not clear configuration. Please try again.',
+          stackTrace: st,
+          contextLabel: 'DatabaseConfig: clear',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }

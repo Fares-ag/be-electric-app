@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_auth_service.dart';
+import '../config/locator.dart';
 
 /// Widget that loads images from Firebase Storage or Supabase Storage with
 /// authentication when needed. Handles expired Supabase signed URLs by
@@ -67,7 +68,7 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
       } else {
         await _loadWithoutAuth();
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading image: $e');
       if (mounted) {
         setState(() {
@@ -133,7 +134,7 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
       } else if (mounted) {
         setState(() { _hasError = true; _isLoading = false; });
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading Supabase image (signed URL): $e');
       if (mounted) setState(() { _hasError = true; _isLoading = false; });
     }
@@ -141,7 +142,7 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
 
   Future<void> _loadWithAuth() async {
     try {
-      final authService = SupabaseAuthService.instance;
+      final authService = sl<SupabaseAuthService>();
       final token = await authService.getIdToken();
 
       final headers = <String, String>{};
@@ -164,7 +165,7 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
         // If auth fails, try without auth (in case token is in URL)
         await _loadWithoutAuth();
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading image with auth: $e');
       // Fallback to loading without auth
       await _loadWithoutAuth();
@@ -186,7 +187,7 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading image without auth: $e');
       if (mounted) {
         setState(() {

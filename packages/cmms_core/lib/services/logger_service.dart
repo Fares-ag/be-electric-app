@@ -27,10 +27,7 @@ enum LogLevel {
 
 /// Centralized logging service with structured logging capabilities
 class LoggerService {
-  // Singleton pattern
-  LoggerService._();
-  static final LoggerService _instance = LoggerService._();
-  static LoggerService get instance => _instance;
+  LoggerService();
 
   // Configuration
   static LogLevel _minimumLogLevel =
@@ -121,7 +118,7 @@ class LoggerService {
     if (_crashReporter != null && error != null) {
       try {
         _crashReporter!(error, stackTrace);
-      } catch (e) {
+      } catch (e, st) {
         // Silently fail if crash reporter throws
         debugPrint('âš ï¸ Crash reporter failed: $e');
       }

@@ -1,4 +1,6 @@
-﻿// Workflow Provider - State management for workflow operations
+// Workflow Provider - State management for workflow operations
+
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import '../models/user.dart';
@@ -9,22 +11,47 @@ import '../services/workflow_routing_service.dart';
 import '../services/workflow_automation_service.dart';
 import '../services/enhanced_notification_service.dart';
 import '../services/unified_data_service.dart';
+import '../utils/performance_optimizer.dart';
+import '../utils/stream_subscription_cancel.dart';
+import 'domain/cmms_domain_provider.dart';
+import '../config/locator.dart';
 
 /// Provider for managing workflow state and operations
-class WorkflowProvider with ChangeNotifier {
+class WorkflowProvider with ChangeNotifier implements CmmsDomainProvider {
+  WorkflowProvider({UnifiedDataService? dataService})
+      : _dataService = dataService ?? sl<UnifiedDataService>();
+
   final WorkflowPermissionService _permissionService =
-      WorkflowPermissionService();
-  final WorkflowRoutingService _routingService = WorkflowRoutingService();
+      sl<WorkflowPermissionService>();
+  final WorkflowRoutingService _routingService = sl<WorkflowRoutingService>();
   final WorkflowAutomationService _automationService =
-      WorkflowAutomationService();
+      sl<WorkflowAutomationService>();
   final EnhancedNotificationService _notificationService =
-      EnhancedNotificationService();
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+      sl<EnhancedNotificationService>();
+  final UnifiedDataService _dataService;
+
+  bool _isDisposed = false;
+  StreamSubscription<List<Workflow>>? _workflowsSubscription;
+  List<Workflow> _realtimeWorkflows = [];
 
   bool _isLoading = false;
   String? _error;
 
-  List<Workflow> get workflows => _dataService.workflows;
+  List<Workflow> get workflows => _realtimeWorkflows.isNotEmpty
+      ? _realtimeWorkflows
+      : _dataService.workflows;
+
+  Stream<List<Workflow>> get workflowsStream => _dataService.workflowsStream;
+
+  bool get isWorkflowsLoading => _dataService.isWorkflowsLoading;
+
+  int get totalWorkflows => workflows.length;
+  int get pendingApprovalWorkflows =>
+      workflows.where((w) => w.isPendingApproval).length;
+  int get approvedWorkflows => workflows.where((w) => w.isApproved).length;
+  int get completedWorkflows => workflows.where((w) => w.isCompleted).length;
+  int get overdueWorkflows => workflows.where((w) => w.isOverdue).length;
+
   bool get isLoading => _isLoading || _dataService.isWorkflowsLoading;
   String? get error => _error;
 
@@ -43,7 +70,7 @@ class WorkflowProvider with ChangeNotifier {
     try {
       await _dataService.refreshWorkflows();
       debugPrint('Loaded ${workflows.length} workflows');
-    } catch (e) {
+    } catch (e, st) {
       _error = e.toString();
       debugPrint('Error loading workflows: $e');
     } finally {
@@ -122,7 +149,7 @@ class WorkflowProvider with ChangeNotifier {
 
       debugPrint('Created workflow: ${workflowWithApprovers.id}');
       return workflowWithApprovers;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error creating workflow: $e');
       _error = e.toString();
       notifyListeners();
@@ -179,7 +206,7 @@ class WorkflowProvider with ChangeNotifier {
       notifyListeners();
       debugPrint('Workflow approved: ${workflow.id} by ${approver.name}');
       return true;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error approving workflow: $e');
       _error = e.toString();
       notifyListeners();
@@ -236,7 +263,7 @@ class WorkflowProvider with ChangeNotifier {
       notifyListeners();
       debugPrint('Workflow rejected: ${workflow.id} by ${rejector.name}');
       return true;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error rejecting workflow: $e');
       _error = e.toString();
       notifyListeners();
@@ -281,7 +308,7 @@ class WorkflowProvider with ChangeNotifier {
       notifyListeners();
       debugPrint('Workflow cancelled: ${workflow.id}');
       return true;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error cancelling workflow: $e');
       _error = e.toString();
       notifyListeners();
@@ -312,7 +339,7 @@ class WorkflowProvider with ChangeNotifier {
       notifyListeners();
       debugPrint('Workflow completed: ${workflow.id}');
       return true;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error completing workflow: $e');
       _error = e.toString();
       notifyListeners();
@@ -333,6 +360,9 @@ class WorkflowProvider with ChangeNotifier {
             _permissionService.canApproveWorkflow(user, workflow),
       )
       .toList();
+
+  List<Workflow> getPendingApprovalsForUserId(String userId) =>
+      _dataService.getPendingApprovalsForUser(userId);
 
   /// Get workflows by status
   List<Workflow> getWorkflowsByStatus(WorkflowStatus status) =>
@@ -396,7 +426,7 @@ class WorkflowProvider with ChangeNotifier {
       notifyListeners();
       debugPrint('Workflow escalated: ${workflow.id}');
       return true;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error escalating workflow: $e');
       _error = e.toString();
       notifyListeners();
@@ -529,5 +559,177 @@ class WorkflowProvider with ChangeNotifier {
           ? (approved / (pending + approved)) * 100
           : 0,
     };
+  }
+
+  Future<String> createWorkflowRecord(Workflow workflow) async {
+    try {
+      final workflowId = await _dataService.createWorkflow(workflow);
+      notifyListeners();
+      return workflowId;
+    } catch (e, st) {
+      debugPrint('WorkflowProvider: Error creating workflow record: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> updateWorkflowRecord(Workflow workflow) async {
+    try {
+      await _dataService.updateWorkflow(workflow);
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('WorkflowProvider: Error updating workflow record: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> deleteWorkflowRecord(String workflowId) async {
+    try {
+      await _dataService.deleteWorkflow(workflowId);
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('WorkflowProvider: Error deleting workflow record: $e');
+      rethrow;
+    }
+  }
+
+  Workflow? getWorkflowById(String workflowId) =>
+      _dataService.getWorkflowById(workflowId);
+
+  List<Workflow> getWorkflowsByCreator(String userId) =>
+      _dataService.getWorkflowsByCreator(userId);
+
+  List<Workflow> getWorkflowsByAssignee(String userId) =>
+      _dataService.getWorkflowsByAssignee(userId);
+
+  Future<void> refreshWorkflows() async {
+    try {
+      await _dataService.refreshWorkflows();
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('WorkflowProvider: Error refreshing workflows: $e');
+    }
+  }
+
+  Future<void> approveWorkflowRecord({
+    required String workflowId,
+    required String approverId,
+    required String approverName,
+    required String approverRole,
+    String? comments,
+  }) async {
+    await _dataService.approveWorkflow(
+      workflowId: workflowId,
+      approverId: approverId,
+      approverName: approverName,
+      approverRole: approverRole,
+      comments: comments,
+    );
+    notifyListeners();
+  }
+
+  Future<void> rejectWorkflowRecord({
+    required String workflowId,
+    required String rejectorId,
+    required String rejectorName,
+    required String rejectorRole,
+    required String reason,
+  }) async {
+    await _dataService.rejectWorkflow(
+      workflowId: workflowId,
+      rejectorId: rejectorId,
+      rejectorName: rejectorName,
+      rejectorRole: rejectorRole,
+      reason: reason,
+    );
+    notifyListeners();
+  }
+
+  Future<void> completeWorkflowRecord({
+    required String workflowId,
+    required String completedBy,
+    String? comments,
+  }) async {
+    await _dataService.completeWorkflow(
+      workflowId: workflowId,
+      completedBy: completedBy,
+      comments: comments,
+    );
+    notifyListeners();
+  }
+
+  Future<void> cancelWorkflowRecord({
+    required String workflowId,
+    required String cancelledBy,
+    required String reason,
+  }) async {
+    await _dataService.cancelWorkflow(
+      workflowId: workflowId,
+      cancelledBy: cancelledBy,
+      reason: reason,
+    );
+    notifyListeners();
+  }
+
+  Future<void> escalateWorkflowRecord({
+    required String workflowId,
+    required String escalatedBy,
+    String? reason,
+  }) async {
+    await _dataService.escalateWorkflow(
+      workflowId: workflowId,
+      escalatedBy: escalatedBy,
+      reason: reason,
+    );
+    notifyListeners();
+  }
+
+  @override
+  void clearCache() {
+    _realtimeWorkflows = [];
+  }
+
+  @override
+  Future<void> cancelRealtimeListeners() async {
+    await cancelStreamSubscriptions([_workflowsSubscription]);
+    _workflowsSubscription = null;
+  }
+
+  @override
+  Future<void> startRealtimeListeners() async {
+    if (_isDisposed) return;
+    await cancelRealtimeListeners();
+    if (_isDisposed) return;
+
+    _workflowsSubscription = _dataService.workflowsStream.listen(
+      (workflows) {
+        _realtimeWorkflows = workflows;
+        if (!_isDisposed) {
+          ChangeNotifierBatcher.batchNotify(
+            () => notifyListeners(),
+            batchKey: this,
+          );
+        }
+      },
+      onError: (error) {
+        if (!error.toString().contains('permission-denied')) {
+          debugPrint('❌ Workflows stream error: $error');
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _isDisposed = true;
+    ChangeNotifierBatcher.cancel(this);
+    unawaited(cancelRealtimeListeners());
+    super.dispose();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
   }
 }

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../models/asset.dart';
 import '../theme/unified_design_system.dart';
 import '../utils/app_theme.dart';
+import '../utils/charger_asset_filter.dart';
 
 class ComprehensiveAssetDisplayWidget extends StatefulWidget {
   const ComprehensiveAssetDisplayWidget({
@@ -90,9 +91,10 @@ class _ComprehensiveAssetDisplayWidgetState
                 style: UnifiedDesignSystem.bodyMedium,
               ),
               // Show manufacturer and model for chargers
-              if (widget.asset.manufacturer != null)
+              if (isChargerLikeAsset(widget.asset) ||
+                  widget.asset.manufacturer != null)
                 Text(
-                  'Manufacturer: ${widget.asset.manufacturer}',
+                  'Manufacturer: ${isChargerLikeAsset(widget.asset) ? resolveChargerManufacturer(widget.asset) : widget.asset.manufacturer}',
                   style: UnifiedDesignSystem.bodyMedium,
                 ),
               if (widget.asset.model != null)
@@ -362,7 +364,12 @@ class _ComprehensiveAssetDisplayWidgetState
         'Technical Details',
         Icons.engineering,
         [
-          _buildInfoRow('Manufacturer', widget.asset.manufacturer),
+          _buildInfoRow(
+            'Manufacturer',
+            isChargerLikeAsset(widget.asset)
+                ? resolveChargerManufacturer(widget.asset)
+                : widget.asset.manufacturer,
+          ),
           _buildInfoRow('Model', widget.asset.model),
           _buildInfoRow('Serial Number', widget.asset.serialNumber),
           _buildInfoRow('Model Year', widget.asset.modelYear?.toString()),

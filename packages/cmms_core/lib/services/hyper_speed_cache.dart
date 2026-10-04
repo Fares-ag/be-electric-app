@@ -3,9 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/asset.dart';
 
 class HyperSpeedCache {
-  factory HyperSpeedCache() => _instance;
-  HyperSpeedCache._internal();
-  static final HyperSpeedCache _instance = HyperSpeedCache._internal();
 
   // In-memory cache for instant access
   static final Map<String, List<Asset>> _memoryCache = {};
@@ -61,7 +58,7 @@ class HyperSpeedCache {
           return assets;
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸš€ HYPER SPEED: Error loading persistent cache: $e');
     }
     return null;
@@ -77,7 +74,7 @@ class HyperSpeedCache {
           '${key}_timestamp', DateTime.now().toIso8601String(),);
       print(
           'ðŸš€ HYPER SPEED: Cached ${assets.length} assets in persistent storage',);
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸš€ HYPER SPEED: Error caching persistent data: $e');
     }
   }
@@ -135,7 +132,7 @@ class HyperSpeedCache {
         }
       }
       print('ðŸš€ HYPER SPEED: Cleared all caches');
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸš€ HYPER SPEED: Error clearing caches: $e');
     }
   }

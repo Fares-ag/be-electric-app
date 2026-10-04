@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import '../../models/asset.dart';
 import '../../models/company.dart';
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../services/unified_data_service.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/charger_asset_filter.dart';
 import '../../utils/responsive_layout.dart';
 import 'create_charger_screen.dart';
+import '../../config/locator.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CompanyChargersScreen extends StatefulWidget {
   const CompanyChargersScreen({
@@ -35,7 +37,7 @@ class _CompanyChargersScreenState extends State<CompanyChargersScreen> {
     setState(() => _isLoading = true);
     try {
       final allAssets =
-          await SupabaseDatabaseService.instance.getAssetsByCompanyId(
+          await CmmsRepositories.assets.getAssetsByCompanyId(
         widget.company.id,
       );
       final chargers = allAssets
@@ -56,14 +58,16 @@ class _CompanyChargersScreenState extends State<CompanyChargersScreen> {
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading chargers: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load chargers. Please try again.',
+          stackTrace: st,
+          contextLabel: 'company_chargers_screen: Could not load chargers. Pleas',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -103,7 +107,7 @@ class _CompanyChargersScreenState extends State<CompanyChargersScreen> {
 
     if (confirmed == true && mounted) {
       try {
-        final unifiedService = UnifiedDataService.instance;
+        final unifiedService = sl<UnifiedDataService>();
         await unifiedService.deleteAsset(charger.id);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -114,14 +118,16 @@ class _CompanyChargersScreenState extends State<CompanyChargersScreen> {
           );
           _loadChargers();
         }
-      } catch (e) {
+      } catch (e, st) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error deleting charger: $e'),
-              backgroundColor: AppTheme.accentRed,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not delete charger. Please try again.',
+          stackTrace: st,
+          contextLabel: 'company_chargers_screen: Could not delete charger. Plea',
+          backgroundColor: AppTheme.accentRed,
+        );
         }
       }
     }
@@ -259,9 +265,9 @@ class _CompanyChargersScreenState extends State<CompanyChargersScreen> {
                                 children: [
                                   if (charger.location.isNotEmpty)
                                     Text('Location: ${charger.location}'),
-                                  if (charger.manufacturer != null)
-                                    Text(
-                                        'Manufacturer: ${charger.manufacturer}'),
+                                  Text(
+                                    'Manufacturer: ${resolveChargerManufacturer(charger)}',
+                                  ),
                                   if (charger.model != null)
                                     Text('Model: ${charger.model}'),
                                   if (charger.serialNumber != null)

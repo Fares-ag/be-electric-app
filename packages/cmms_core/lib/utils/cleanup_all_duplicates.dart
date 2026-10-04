@@ -10,6 +10,7 @@ import '../models/user.dart';
 import '../models/work_order.dart';
 import '../services/supabase_database_service.dart';
 import '../services/unified_data_service.dart';
+import '../config/locator.dart';
 
 /// Utility to clean up all duplicate data
 class CleanupAllDuplicates {
@@ -79,7 +80,7 @@ class CleanupAllDuplicates {
       print('Starting comprehensive duplicate cleanup...');
 
       // Get all data
-      final dataService = UnifiedDataService.instance;
+      final dataService = sl<UnifiedDataService>();
       final users = List<User>.from(dataService.users);
       final workOrders = List<WorkOrder>.from(dataService.workOrders);
       final pmTasks = List<dynamic>.from(dataService.pmTasks);
@@ -137,7 +138,7 @@ class CleanupAllDuplicates {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       print('Error during cleanup: $e');
 
       if (context.mounted) {
@@ -272,13 +273,13 @@ class CleanupAllDuplicates {
     List<dynamic> pmTasks,
   ) async {
     try {
-      final firestore = SupabaseDatabaseService.instance;
+      final firestore = sl<SupabaseDatabaseService>();
 
       // Insert cleaned data (upsert mode - won't create duplicates)
       for (final user in users) {
         try {
           await firestore.createUser(user); // Uses upsert logic
-        } catch (e) {
+        } catch (e, st) {
           print('Warning: Could not save user ${user.id}: $e');
         }
       }
@@ -286,7 +287,7 @@ class CleanupAllDuplicates {
       for (final workOrder in workOrders) {
         try {
           await firestore.createWorkOrder(workOrder); // Uses upsert logic
-        } catch (e) {
+        } catch (e, st) {
           print('Warning: Could not save work order ${workOrder.id}: $e');
         }
       }
@@ -294,13 +295,13 @@ class CleanupAllDuplicates {
       for (final pmTask in pmTasks) {
         try {
           await firestore.createPMTask(pmTask); // Uses upsert logic
-        } catch (e) {
+        } catch (e, st) {
           print('Warning: Could not save PM task ${pmTask.id}: $e');
         }
       }
 
       print('Supabase data updated with cleaned records');
-    } catch (e) {
+    } catch (e, st) {
       print('Error updating Supabase: $e');
     }
   }

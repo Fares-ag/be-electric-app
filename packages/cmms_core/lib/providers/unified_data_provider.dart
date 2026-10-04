@@ -1,12 +1,8 @@
-// Unified Data Provider - Single provider for all data across the app
-// This ensures data consistency and synchronization across all screens
-// NOW WITH REAL-TIME SUPABASE SYNC!
+// Backward-compatible facade over domain providers.
+// New code should prefer WorkOrderProvider, AssetProvider, UserProvider,
+// InventoryProvider, and WorkflowProvider directly.
 
-import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' as sb;
-import 'package:uuid/uuid.dart';
 
 import '../models/asset.dart';
 import '../models/inventory_item.dart';
@@ -14,535 +10,163 @@ import '../models/pm_task.dart';
 import '../models/user.dart';
 import '../models/work_order.dart';
 import '../models/workflow_models.dart';
-import '../services/enhanced_notification_service.dart';
-import '../services/parts_request_service.dart';
-import '../services/realtime_supabase_service.dart';
-import '../services/supabase_database_service.dart';
-import '../services/supabase_storage_service.dart';
-import '../services/unified_data_service.dart';
-import '../utils/performance_optimizer.dart';
-import '../utils/stream_subscription_cancel.dart';
+import 'asset_provider.dart';
+import 'cmms_data_coordinator.dart';
+import 'inventory_provider.dart';
+import 'user_provider.dart';
+import 'work_order_provider.dart';
+import 'workflow_provider.dart';
 
 class UnifiedDataProvider with ChangeNotifier {
-  // Constructor - Auto-initialize on creation
-  UnifiedDataProvider() {
-    debugPrint('🚀 UnifiedDataProvider: Constructor called, initializing...');
-    _watchAuthState();
-    initialize();
-  }
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  UnifiedDataProvider({
+    required WorkOrderProvider workOrders,
+    required AssetProvider assets,
+    required UserProvider users,
+    required InventoryProvider inventory,
+    required WorkflowProvider workflows,
+    required CmmsDataCoordinator coordinator,
+  })  : _workOrders = workOrders,
+        _assets = assets,
+        _users = users,
+        _inventory = inventory,
+        _workflows = workflows,
+        _coordinator = coordinator;
+
+  final WorkOrderProvider _workOrders;
+  final AssetProvider _assets;
+  final UserProvider _users;
+  final InventoryProvider _inventory;
+  final WorkflowProvider _workflows;
+  final CmmsDataCoordinator _coordinator;
+
   bool _isDisposed = false;
 
-  // Stream subscriptions for real-time updates
-  // Note: work orders now use a channel (not a stream) — see _startRealtimeListeners.
-  StreamSubscription<List<PMTask>>? _pmTasksSubscription;
-  StreamSubscription<List<Asset>>? _assetsSubscription;
-  StreamSubscription<List<User>>? _usersSubscription;
-  StreamSubscription<List<InventoryItem>>? _inventorySubscription;
-  StreamSubscription<List<Workflow>>? _workflowsSubscription;
-
-  // Auth subscription so we re-load data exactly once a user signs in (and
-  // skip the wasted RLS-rejected fetches when no session is present yet).
-  StreamSubscription<sb.AuthState>? _authSubscription;
-
-  // Real-time data cache
-  List<WorkOrder> _realtimeWorkOrders = [];
-
-  // ── Pagination state for work orders ───────────────────────────────────────
-  static const int _woPageSize = 30;
-  int _woNextPage = 1;          // page 0 loaded during initialize()
-  bool _hasMoreWorkOrders = true;
-  bool _isLoadingMoreWorkOrders = false;
-
-  bool get hasMoreWorkOrders => _hasMoreWorkOrders;
-  bool get isLoadingMoreWorkOrders => _isLoadingMoreWorkOrders;
-  List<PMTask> _realtimePMTasks = [];
-  List<Asset> _realtimeAssets = [];
-  List<User> _realtimeUsers = [];
-  List<InventoryItem> _realtimeInventory = [];
-  List<Workflow> _realtimeWorkflows = [];
-
-  // =====================
-  // De-duplication helpers
-  // =====================
-  List<WorkOrder> _dedupeWorkOrders(List<WorkOrder> list) {
-    // Primary: by id (keep newest updatedAt)
-    final byId = <String, WorkOrder>{};
-    for (final wo in list) {
-      final existing = byId[wo.id];
-      final existingUpdatedAt = existing?.updatedAt ?? existing?.createdAt;
-      final currentUpdatedAt = wo.updatedAt;
-      if (existing == null ||
-          (existingUpdatedAt == null) ||
-          currentUpdatedAt.isAfter(existingUpdatedAt)) {
-        byId[wo.id] = wo;
-      }
-    }
-
-    // Secondary: by ticketNumber (guard against dual IDs for same ticket)
-    final byTicket = <String, WorkOrder>{};
-    for (final wo in byId.values) {
-      final key = wo.ticketNumber;
-      final existing = byTicket[key];
-      final existingUpdatedAt = existing?.updatedAt ?? existing?.createdAt;
-      final currentUpdatedAt = wo.updatedAt;
-      if (existing == null ||
-          (existingUpdatedAt == null) ||
-          currentUpdatedAt.isAfter(existingUpdatedAt)) {
-        byTicket[key] = wo;
-      }
-    }
-
-    return byTicket.values.toList();
+  void notifyFromDomainChange() {
+    notifyListeners();
   }
 
-  List<PMTask> _dedupePMTasks(List<PMTask> list) {
-    // Primary: by id
-    final byId = <String, PMTask>{};
-    for (final pm in list) {
-      final existing = byId[pm.id];
-      var shouldReplace = existing == null;
-      if (!shouldReplace) {
-        final existingTime = existing.updatedAt ?? existing.createdAt;
-        final currentTime = pm.updatedAt ?? pm.createdAt;
-        shouldReplace = currentTime.isAfter(existingTime);
-      }
-      if (shouldReplace) {
-        byId[pm.id] = pm;
-      }
-    }
+  // ── Data getters ───────────────────────────────────────────────────────────
 
-    // Secondary composite key: taskName + assetId + nextDueDate
-    final byComposite = <String, PMTask>{};
-    for (final pm in byId.values) {
-      final composite =
-          '${pm.taskName.toLowerCase()}|${pm.assetId}|${pm.nextDueDate?.toIso8601String() ?? ''}';
-      final existing = byComposite[composite];
-      var shouldReplace = existing == null;
-      if (!shouldReplace) {
-        final existingTime = existing.updatedAt ?? existing.createdAt;
-        final currentTime = pm.updatedAt ?? pm.createdAt;
-        shouldReplace = currentTime.isAfter(existingTime);
-      }
-      if (shouldReplace) {
-        byComposite[composite] = pm;
-      }
-    }
+  List<WorkOrder> get workOrders => _workOrders.workOrders;
+  List<PMTask> get pmTasks => _workOrders.pmTasks;
+  List<User> get users => _users.users;
+  List<Asset> get assets => _assets.assets;
+  List<InventoryItem> get inventoryItems => _inventory.items;
+  List<Workflow> get workflows => _workflows.workflows;
 
-    return byComposite.values.toList();
-  }
-
-  List<User> _dedupeUsers(List<User> list) {
-    // Use normalized email as key; keep most recently updated
-    final byEmail = <String, User>{};
-    for (final u in list) {
-      final emailKey = (u.email.isNotEmpty ? u.email : u.workEmail ?? '')
-          .toLowerCase()
-          .trim();
-      final key = emailKey.isNotEmpty ? emailKey : u.id;
-      final existing = byEmail[key];
-      if (existing == null ||
-          ((u.updatedAt ?? u.createdAt)
-              .isAfter(existing.updatedAt ?? existing.createdAt))) {
-        byEmail[key] = u;
-      }
-    }
-    return byEmail.values.toList();
-  }
-
-  // Getters for all data - Returns real-time data if available, falls back to cached
-  List<WorkOrder> get workOrders => _realtimeWorkOrders.isNotEmpty
-      ? _realtimeWorkOrders
-      : _dataService.workOrders;
-  List<PMTask> get pmTasks =>
-      _realtimePMTasks.isNotEmpty ? _realtimePMTasks : _dataService.pmTasks;
-  List<User> get users =>
-      _realtimeUsers.isNotEmpty ? _realtimeUsers : _dataService.users;
-  List<Asset> get assets =>
-      _realtimeAssets.isNotEmpty ? _realtimeAssets : _dataService.assets;
-  List<InventoryItem> get inventoryItems => _realtimeInventory.isNotEmpty
-      ? _realtimeInventory
-      : _dataService.inventoryItems;
-  List<Workflow> get workflows => _realtimeWorkflows.isNotEmpty
-      ? _realtimeWorkflows
-      : _dataService.workflows;
-
-  // Stream getters for direct Supabase access
-  Stream<List<WorkOrder>> get workOrdersStream => _dataService.workOrdersStream;
-  Stream<List<PMTask>> get pmTasksStream => _dataService.pmTasksStream;
-  Stream<List<Asset>> get assetsStream => _dataService.assetsStream;
-  Stream<List<User>> get usersStream => _dataService.usersStream;
+  Stream<List<WorkOrder>> get workOrdersStream => _workOrders.workOrdersStream;
+  Stream<List<PMTask>> get pmTasksStream => _workOrders.pmTasksStream;
+  Stream<List<Asset>> get assetsStream => _assets.assetsStream;
+  Stream<List<User>> get usersStream => _users.usersStream;
   Stream<List<InventoryItem>> get inventoryItemsStream =>
-      _dataService.inventoryItemsStream;
-  Stream<List<Workflow>> get workflowsStream => _dataService.workflowsStream;
+      _inventory.inventoryItemsStream;
+  Stream<List<Workflow>> get workflowsStream => _workflows.workflowsStream;
 
-  // Loading states
-  bool get isWorkOrdersLoading => _dataService.isWorkOrdersLoading;
-  bool get isPMTasksLoading => _dataService.isPMTasksLoading;
-  bool get isUsersLoading => _dataService.isUsersLoading;
-  bool get isAssetsLoading => _dataService.isAssetsLoading;
-  bool get isInventoryLoading => _dataService.isInventoryLoading;
-  bool get isWorkflowsLoading => _dataService.isWorkflowsLoading;
+  bool get isWorkOrdersLoading => _workOrders.isWorkOrdersLoading;
+  bool get isPMTasksLoading => _workOrders.isPMTasksLoading;
+  bool get isUsersLoading => _users.isUsersLoading;
+  bool get isAssetsLoading => _assets.isAssetsLoading;
+  bool get isInventoryLoading => _inventory.isLoading;
+  bool get isWorkflowsLoading => _workflows.isWorkflowsLoading;
 
-  // Work order statistics - NOW USING REAL-TIME DATA!
-  int get totalWorkOrders => workOrders.length;
-  int get openWorkOrders => workOrders.where((wo) => wo.isOpen).length;
-  int get inProgressWorkOrders =>
-      workOrders.where((wo) => wo.isInProgress).length;
-  int get completedWorkOrders =>
-      workOrders.where((wo) => wo.isCompleted).length;
+  bool get hasMoreWorkOrders => _workOrders.hasMoreWorkOrders;
+  bool get isLoadingMoreWorkOrders => _workOrders.isLoadingMoreWorkOrders;
 
-  // Completed work orders today
-  int get completedWorkOrdersToday {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    return workOrders.where((wo) {
-      if (!wo.isCompleted || wo.completedAt == null) return false;
-      final completedDate = DateTime(
-        wo.completedAt!.year,
-        wo.completedAt!.month,
-        wo.completedAt!.day,
-      );
-      return completedDate.isAtSameMomentAs(today);
-    }).length;
-  }
+  // ── Work order stats ───────────────────────────────────────────────────────
 
-  int get overdueWorkOrders => workOrders.where((wo) => wo.isOverdue).length;
-  int get highPriorityWorkOrders =>
-      workOrders.where((wo) => wo.isHighPriority).length;
+  int get totalWorkOrders => _workOrders.totalWorkOrders;
+  int get openWorkOrders => _workOrders.openWorkOrders;
+  int get inProgressWorkOrders => _workOrders.inProgressWorkOrders;
+  int get completedWorkOrders => _workOrders.completedWorkOrders;
+  int get completedWorkOrdersToday => _workOrders.completedWorkOrdersToday;
+  int get overdueWorkOrders => _workOrders.overdueWorkOrders;
+  int get highPriorityWorkOrders => _workOrders.highPriorityWorkOrders;
 
-  // PM task statistics - NOW USING REAL-TIME DATA!
-  int get totalPMTasks => pmTasks.length;
-  int get pendingPMTasks => pmTasks.where((task) => task.isPending).length;
-  int get inProgressPMTasks =>
-      pmTasks.where((task) => task.isInProgress).length;
-  int get completedPMTasks => pmTasks.where((task) => task.isCompleted).length;
-  int get overduePMTasks => pmTasks.where((task) => task.isOverdue).length;
+  // ── PM task stats ──────────────────────────────────────────────────────────
 
-  // Due PM Tasks: tasks that are pending/overdue and due today or overdue
-  int get duePMTasks {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    return pmTasks.where((task) {
-      // Include tasks that are pending or overdue
-      if (!task.isPending && !task.isOverdue) return false;
-      // Include tasks that are due today or overdue
-      if (task.nextDueDate == null) return false;
-      final dueDate = DateTime(
-        task.nextDueDate!.year,
-        task.nextDueDate!.month,
-        task.nextDueDate!.day,
-      );
-      return dueDate.isBefore(today) || dueDate.isAtSameMomentAs(today);
-    }).length;
-  }
+  int get totalPMTasks => _workOrders.totalPMTasks;
+  int get pendingPMTasks => _workOrders.pendingPMTasks;
+  int get inProgressPMTasks => _workOrders.inProgressPMTasks;
+  int get completedPMTasks => _workOrders.completedPMTasks;
+  int get overduePMTasks => _workOrders.overduePMTasks;
+  int get duePMTasks => _workOrders.duePMTasks;
 
-  // User statistics - NOW USING REAL-TIME DATA!
-  int get totalUsers => users.length;
-  int get technicians =>
-      users.where((user) => user.role == 'technician').length;
-  int get managers => users.where((user) => user.role == 'manager').length;
-  int get admins => users.where((user) => user.role == 'admin').length;
-  int get requestors => users.where((user) => user.role == 'requestor').length;
+  // ── User stats ─────────────────────────────────────────────────────────────
 
-  // Asset statistics - NOW USING REAL-TIME DATA!
-  int get totalAssets => assets.length;
+  int get totalUsers => _users.totalUsers;
+  int get technicians => _users.technicians;
+  int get managers => _users.managers;
+  int get admins => _users.admins;
+  int get requestors => _users.requestors;
 
-  // Inventory statistics - NOW USING REAL-TIME DATA!
-  int get totalInventory => inventoryItems.length;
-  int get lowStockItems =>
-      inventoryItems.where((item) => item.quantity <= 10).length;
+  // ── Other domain stats ─────────────────────────────────────────────────────
 
-  // Workflow statistics - NOW USING REAL-TIME DATA!
-  int get totalWorkflows => workflows.length;
-  int get pendingApprovalWorkflows =>
-      workflows.where((w) => w.isPendingApproval).length;
-  int get approvedWorkflows => workflows.where((w) => w.isApproved).length;
-  int get completedWorkflows => workflows.where((w) => w.isCompleted).length;
-  int get overdueWorkflows => workflows.where((w) => w.isOverdue).length;
+  int get totalAssets => _assets.assets.length;
+  int get totalInventory => _inventory.totalInventory;
+  int get lowStockItems => _inventory.lowStockItems;
+  int get totalWorkflows => _workflows.totalWorkflows;
+  int get pendingApprovalWorkflows => _workflows.pendingApprovalWorkflows;
+  int get approvedWorkflows => _workflows.approvedWorkflows;
+  int get completedWorkflows => _workflows.completedWorkflows;
+  int get overdueWorkflows => _workflows.overdueWorkflows;
 
-  /// Initialize all data and start real-time listeners
-  Future<void> initialize() async {
-    try {
-      // Initialize local database first (for offline support)
-      await _dataService.initialize();
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-      // Start listening to real-time Supabase streams
-      await _startRealtimeListeners();
+  Future<void> initialize() => _coordinator.initialize();
 
+  Future<void> refreshAll() async {
+    await _coordinator.refreshAll();
       notifyListeners();
-      debugPrint(
-        '✅ UnifiedDataProvider: Initialized with real-time Supabase sync!',
-      );
+  }
+
+  /// Technician shell: reload WO/PM/users/assets (faster than [refreshAll]).
+  Future<bool> refreshTechnicianSurface() {
+    final existing = _refreshTechnicianSurfaceInFlight;
+    if (existing != null) return existing;
+    final refresh = _refreshTechnicianSurfaceImpl();
+    _refreshTechnicianSurfaceInFlight = refresh;
+    refresh.whenComplete(() {
+      if (_refreshTechnicianSurfaceInFlight == refresh) {
+        _refreshTechnicianSurfaceInFlight = null;
+      }
+    });
+    return refresh;
+  }
+
+  Future<bool>? _refreshTechnicianSurfaceInFlight;
+
+  Future<bool> _refreshTechnicianSurfaceImpl() async {
+    try {
+      await _workOrders.refreshTechnicianSurface();
+      notifyListeners();
+      return true;
     } catch (e) {
-      debugPrint('UnifiedDataProvider: Error initializing: $e');
+      debugPrint('UnifiedDataProvider: Error refreshTechnicianSurface: $e');
+      return false;
     }
   }
 
-  /// Cancel active realtime stream subscriptions before re-subscribing.
-  Future<void> _cancelRealtimeStreamSubscriptions() async {
-    RealtimeSupabaseService.instance.stopListeningToWorkOrderChanges();
-    EnhancedNotificationService().stopRealtimeListener();
-    PartsRequestService().stopRealtimeListener();
-    await cancelStreamSubscriptions([
-      _pmTasksSubscription,
-      _assetsSubscription,
-      _usersSubscription,
-      _inventorySubscription,
-      _workflowsSubscription,
-    ]);
-    _pmTasksSubscription = null;
-    _assetsSubscription = null;
-    _usersSubscription = null;
-    _inventorySubscription = null;
-    _workflowsSubscription = null;
+  /// Cache-only work order update used when queueing offline completion.
+  Future<WorkOrder> applyLocalWorkOrderUpdate(WorkOrder workOrder) =>
+      _workOrders.applyLocalWorkOrderUpdate(workOrder);
+
+  /// Cache-only PM task update used when queueing offline completion.
+  Future<PMTask> applyLocalPMTaskUpdate(PMTask pmTask) =>
+      _workOrders.applyLocalPMTaskUpdate(pmTask);
+
+  Future<void> loadRequestorWorkOrders(String requestorId) async {
+    await _workOrders.loadRequestorWorkOrders(requestorId);
   }
 
-  /// Start listening to real-time Supabase streams
-  Future<void> _startRealtimeListeners() async {
-    if (_isDisposed) return;
+  Future<void> refreshWorkOrder(String workOrderId) =>
+      _workOrders.refreshWorkOrder(workOrderId);
 
-    await _cancelRealtimeStreamSubscriptions();
-    if (_isDisposed) return;
-
-    debugPrint(
-      '🔥 UnifiedDataProvider: Starting real-time Supabase listeners...',
-    );
-
-    // Work Orders: channel-based incremental events (INSERT/UPDATE/DELETE only).
-    // The initial data comes from the paged load during initialize().
-    // This replaces the old .stream() subscription that re-delivered ALL rows.
-    RealtimeSupabaseService.instance.listenToWorkOrderChanges(
-      (event) {
-        if (_isDisposed) return;
-
-        switch (event.type) {
-          case WorkOrderChangeType.delete:
-            if (event.deletedId != null) {
-              _realtimeWorkOrders.removeWhere(
-                (wo) => wo.id == event.deletedId,
-              );
-            }
-
-          case WorkOrderChangeType.insert:
-          case WorkOrderChangeType.update:
-            final wo = event.workOrder;
-            if (wo == null) return;
-
-            final missingUsers = <String>{};
-            final missingAssets = <String>{};
-            final populated = _populateWorkOrderReferences(
-              [wo],
-              missingUserIds: missingUsers,
-              missingAssetIds: missingAssets,
-            );
-            final updated = populated.isNotEmpty ? populated.first : wo;
-
-            final idx = _realtimeWorkOrders.indexWhere(
-              (x) => x.id == updated.id,
-            );
-            if (idx != -1) {
-              _realtimeWorkOrders[idx] = updated;
-            } else {
-              // New insert — prepend so it appears at the top of the list.
-              _realtimeWorkOrders.insert(0, updated);
-            }
-
-            if (missingUsers.isNotEmpty || missingAssets.isNotEmpty) {
-              unawaited(
-                _recoverMissingReferences(
-                  userIds: missingUsers,
-                  assetIds: missingAssets,
-                ),
-              );
-            }
-        }
-
-        _dataService.syncRealtimeWorkOrders(_realtimeWorkOrders);
-        ChangeNotifierBatcher.batchNotify(
-          () => notifyListeners(),
-          batchKey: this,
-        );
-      },
-    );
-
-    // PM Tasks Stream
-    _pmTasksSubscription = _dataService.pmTasksStream.listen(
-      (pmTasks) {
-        final missingUsers = <String>{};
-        final missingAssets = <String>{};
-        _realtimePMTasks = _populatePMTaskReferences(
-          _dedupePMTasks(pmTasks),
-          missingUserIds: missingUsers,
-          missingAssetIds: missingAssets,
-        );
-        if (!_isDisposed) {
-          ChangeNotifierBatcher.batchNotify(
-            () => notifyListeners(),
-            batchKey: this,
-          );
-        }
-        // Removed verbose real-time update logging
-
-        if (missingUsers.isNotEmpty || missingAssets.isNotEmpty) {
-          unawaited(
-            _recoverMissingReferences(
-              userIds: missingUsers,
-              assetIds: missingAssets,
-            ),
-          );
-        }
-      },
-      onError: (error) {
-        debugPrint('❌ PM tasks stream error: $error');
-      },
-    );
-
-    // Assets Stream
-    _assetsSubscription = _dataService.assetsStream.listen(
-      (assets) {
-        _realtimeAssets = assets;
-        if (_realtimeWorkOrders.isNotEmpty) {
-          _realtimeWorkOrders =
-              _populateWorkOrderReferences(_realtimeWorkOrders);
-        }
-        if (_realtimePMTasks.isNotEmpty) {
-          _realtimePMTasks = _populatePMTaskReferences(_realtimePMTasks);
-        }
-        if (!_isDisposed) {
-          ChangeNotifierBatcher.batchNotify(
-            () => notifyListeners(),
-            batchKey: this,
-          );
-        }
-        // Removed verbose real-time update logging
-      },
-      onError: (error) {
-        debugPrint('❌ Assets stream error: $error');
-        // Don't crash on stream errors, just log them
-      },
-    );
-
-    // Users Stream
-    _usersSubscription = _dataService.usersStream.listen(
-      (users) {
-        _realtimeUsers = _dedupeUsers(users);
-        if (_realtimeWorkOrders.isNotEmpty) {
-          _realtimeWorkOrders =
-              _populateWorkOrderReferences(_realtimeWorkOrders);
-        }
-        if (_realtimePMTasks.isNotEmpty) {
-          _realtimePMTasks = _populatePMTaskReferences(_realtimePMTasks);
-        }
-        if (!_isDisposed) {
-          ChangeNotifierBatcher.batchNotify(
-            () => notifyListeners(),
-            batchKey: this,
-          );
-        }
-        // Removed verbose real-time update logging
-      },
-      onError: (error) {
-        debugPrint('❌ Users stream error: $error');
-        // Don't crash on stream errors, just log them
-      },
-    );
-
-    // Inventory Stream
-    _inventorySubscription = _dataService.inventoryItemsStream.listen(
-      (inventory) {
-        _realtimeInventory = inventory;
-        if (!_isDisposed) {
-          ChangeNotifierBatcher.batchNotify(
-            () => notifyListeners(),
-            batchKey: this,
-          );
-        }
-        // Removed verbose real-time update logging
-      },
-      onError: (error) {
-        debugPrint('❌ Inventory stream error: $error');
-        // Don't crash on stream errors, just log them
-      },
-    );
-
-    // Workflows Stream
-    _workflowsSubscription = _dataService.workflowsStream.listen(
-      (workflows) {
-        _realtimeWorkflows = workflows;
-        if (!_isDisposed) {
-          ChangeNotifierBatcher.batchNotify(
-            () => notifyListeners(),
-            batchKey: this,
-          );
-        }
-        // Removed verbose real-time update logging
-      },
-      onError: (error) {
-        // Suppress verbose permission denied errors - will be fixed after deploying Supabase rules
-        if (!error.toString().contains('permission-denied')) {
-          debugPrint('❌ Workflows stream error: $error');
-        }
-        // Don't crash on stream errors, just log them
-      },
-    );
-
-    _startSharedRealtimeListeners();
-
-    debugPrint('✅ UnifiedDataProvider: All real-time listeners started!');
-  }
-
-  /// Notifications + parts_requests channels (Admin ↔ Technician field loop).
-  void _startSharedRealtimeListeners() {
-    final userId = sb.Supabase.instance.client.auth.currentUser?.id;
-    if (userId != null && userId.isNotEmpty) {
-      EnhancedNotificationService().startRealtimeListener(userId);
-    }
-    PartsRequestService().startRealtimeListener();
-  }
-
-  /// Dispose all stream subscriptions
   @override
   void dispose() {
     _isDisposed = true;
-    ChangeNotifierBatcher.cancel(this);
-    unawaited(_cancelRealtimeStreamSubscriptions());
-    _authSubscription?.cancel();
-    _authSubscription = null;
-    debugPrint('🔥 UnifiedDataProvider: All real-time listeners disposed');
     super.dispose();
   }
 
-  /// Re-run data load when the Supabase session transitions to signed-in.
-  /// Without this, the pre-auth `initialize()` is a no-op (good) but no one
-  /// would re-load after the user logs in.
-  void _watchAuthState() {
-    try {
-      _authSubscription = sb.Supabase.instance.client.auth.onAuthStateChange
-          .listen((event) {
-        switch (event.event) {
-          case sb.AuthChangeEvent.signedIn:
-          case sb.AuthChangeEvent.tokenRefreshed:
-          case sb.AuthChangeEvent.userUpdated:
-            // Trigger a load if we haven't loaded data for this user yet.
-            unawaited(initialize());
-            break;
-          case sb.AuthChangeEvent.signedOut:
-          case sb.AuthChangeEvent.userDeleted:
-            unawaited(_cancelRealtimeStreamSubscriptions());
-            _dataService.resetInitialization();
-            _resetWorkOrderPagination();
-            break;
-          default:
-            break;
-        }
-      });
-    } catch (e) {
-      debugPrint('⚠️ UnifiedDataProvider: auth listener setup failed: $e');
-    }
-  }
-
-  /// Safe notifyListeners that checks if disposed
   @override
   void notifyListeners() {
     if (!_isDisposed) {
@@ -550,999 +174,50 @@ class UnifiedDataProvider with ChangeNotifier {
     }
   }
 
-  /// Refresh all data (resets pagination to page 0).
-  Future<void> refreshAll() async {
-    try {
-      _resetWorkOrderPagination();
-      await _dataService.refreshAll();
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error refreshing: $e');
-    }
-  }
+  // ── Work order queries ─────────────────────────────────────────────────────
 
-  /// Load the full requestor work-order list (not the global page-30 cache).
-  Future<void> loadRequestorWorkOrders(String requestorId) async {
-    try {
-      await _dataService.loadWorkOrdersForRequestor(requestorId);
-      _hasMoreWorkOrders = false;
-      _woNextPage = 1;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error loading requestor WOs: $e');
-      rethrow;
-    }
-  }
+  List<WorkOrder> getWorkOrdersByTechnician(String technicianId) =>
+      _workOrders.getWorkOrdersByTechnician(technicianId);
 
-  /// Refresh a specific work order (optimized - doesn't reload all data)
-  Future<void> refreshWorkOrder(String workOrderId) async {
-    try {
-      // The real-time listener will automatically update the work order
-      // Just wait a moment for the listener to pick up the change
-      await Future.delayed(const Duration(milliseconds: 300));
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error refreshing work order: $e');
-    }
-  }
+  List<PMTask> getPMTasksByTechnician(String technicianId) =>
+      _workOrders.getPMTasksByTechnician(technicianId);
 
-  /// Get work orders by technician - NOW USING REAL-TIME DATA!
-  List<WorkOrder> getWorkOrdersByTechnician(String technicianId) {
-    final filtered =
-        workOrders.where((wo) => wo.hasTechnician(technicianId)).toList();
+  List<User> getTechnicians() => _users.getTechnicians();
+  List<User> getManagers() => _users.getManagers();
+  List<User> getAdmins() => _users.getAdmins();
 
-    // Debug: Show first few assigned IDs to help diagnose
-    if (filtered.isEmpty && workOrders.isNotEmpty) {
-      debugPrint('⚠️ No matches found. Sample assignedTechnicianIds:');
-      for (final wo in workOrders.take(5)) {
-        debugPrint(
-          '  - WorkOrder ${wo.id}: assignedTechnicianIds = ${wo.assignedTechnicianIds.join(",")}',
-        );
-      }
-    }
+  List<WorkOrder> getWorkOrdersByStatus(dynamic status) =>
+      _workOrders.getWorkOrdersByStatus(status);
 
-    return filtered;
-  }
+  List<WorkOrder> getWorkOrdersByPriority(dynamic priority) =>
+      _workOrders.getWorkOrdersByPriority(priority);
 
-  /// Get PM tasks by technician - NOW USING REAL-TIME DATA!
-  List<PMTask> getPMTasksByTechnician(String technicianId) {
-    final filtered =
-        pmTasks.where((task) => task.hasTechnician(technicianId)).toList();
-
-    // Debug: Show first few assigned IDs to help diagnose
-    if (filtered.isEmpty && pmTasks.isNotEmpty) {
-      debugPrint('⚠️ No matches found. Sample assignedTechnicianIds:');
-      for (final task in pmTasks.take(5)) {
-        debugPrint(
-          '  - PMTask ${task.id}: assignedTechnicianIds = ${task.assignedTechnicianIds.join(",")}',
-        );
-      }
-    }
-
-    return filtered;
-  }
-
-  /// Get technicians only - NOW USING REAL-TIME DATA!
-  List<User> getTechnicians() {
-    // Filter technicians (case-insensitive)
-    final technicians =
-        users.where((user) => user.role.toLowerCase() == 'technician').toList();
-
-    if (technicians.isEmpty && users.isNotEmpty) {
-      debugPrint('⚠️ No technicians found! Sample user roles:');
-      users.take(5).forEach((user) {
-        debugPrint('  - User ${user.name}: role = "${user.role}"');
-      });
-    }
-
-    return technicians;
-  }
-
-  /// Convenience filter for managers
-  List<User> getManagers() =>
-      users.where((user) => user.role.toLowerCase() == 'manager').toList();
-
-  /// Convenience filter for admins
-  List<User> getAdmins() =>
-      users.where((user) => user.role.toLowerCase() == 'admin').toList();
-
-  /// Filter work orders by status (supports enum or string)
-  List<WorkOrder> getWorkOrdersByStatus(dynamic status) {
-    final target = status is WorkOrderStatus
-        ? status.name
-        : status is String
-            ? status.toLowerCase()
-            : null;
-    if (target == null) return const <WorkOrder>[];
-
-    return workOrders
-        .where((wo) => wo.status.name.toLowerCase() == target)
-        .toList();
-  }
-
-  /// Filter work orders by priority (supports enum or string)
-  List<WorkOrder> getWorkOrdersByPriority(dynamic priority) {
-    final target = priority is WorkOrderPriority
-        ? priority.name
-        : priority is String
-            ? priority.toLowerCase()
-            : null;
-    if (target == null) return const <WorkOrder>[];
-
-    return workOrders
-        .where((wo) => wo.priority.name.toLowerCase() == target)
-        .toList();
-  }
-
-  /// Filter work orders by requestor id
   List<WorkOrder> getWorkOrdersByRequestor(String requestorId) =>
-      workOrders.where((wo) => wo.requestorId == requestorId).toList();
+      _workOrders.getWorkOrdersByRequestor(requestorId);
 
-  /// Return only overdue work orders
-  List<WorkOrder> getOverdueWorkOrders() =>
-      workOrders.where((wo) => wo.isOverdue).toList();
+  List<WorkOrder> getOverdueWorkOrders() => _workOrders.getOverdueWorkOrders();
 
-  /// Return only overdue PM tasks
-  List<PMTask> getOverduePMTasks() => pmTasks
-      .where(
-        (task) => task.status == PMTaskStatus.overdue || (task.isOverdue),
-      )
-      .toList();
+  List<PMTask> getOverduePMTasks() => _workOrders.getOverduePMTasks();
 
-  /// Filter PM tasks by status
   List<PMTask> getPMTasksByStatus(PMTaskStatus status) =>
-      pmTasks.where((task) => task.status == status).toList();
+      _workOrders.getPMTasksByStatus(status);
 
-  /// Inventory helpers
   List<InventoryItem> getLowStockItems({double? threshold}) =>
-      inventoryItems.where((item) {
-        final minThreshold = threshold ?? item.minimumStock ?? 0;
-        return item.quantity < minThreshold;
-      }).toList();
+      _inventory.getLowStockItems(threshold: threshold);
 
-  List<InventoryItem> getInventoryByCategory(String category) {
-    final target = category.toLowerCase();
-    return inventoryItems
-        .where((item) => item.category.toLowerCase() == target)
-        .toList();
-  }
+  List<InventoryItem> getInventoryByCategory(String category) =>
+      _inventory.getInventoryByCategory(category);
 
-  /// Aggregate performance data for a technician
-  Map<String, dynamic> getTechnicianPerformance(String technicianId) {
-    final technicianWorkOrders = getWorkOrdersByTechnician(technicianId);
-    final technicianPMTasks = getPMTasksByTechnician(technicianId);
+  Map<String, dynamic> getTechnicianPerformance(String technicianId) =>
+      _workOrders.getTechnicianPerformance(technicianId);
 
-    final workOrderStats = {
-      'total': technicianWorkOrders.length,
-      'completed': technicianWorkOrders.where((wo) => wo.isCompleted).length,
-      'inProgress': technicianWorkOrders.where((wo) => wo.isInProgress).length,
-      'overdue': technicianWorkOrders.where((wo) => wo.isOverdue).length,
-    };
-
-    final pmTaskStats = {
-      'total': technicianPMTasks.length,
-      'completed': technicianPMTasks.where((task) => task.isCompleted).length,
-      'inProgress': technicianPMTasks.where((task) => task.isInProgress).length,
-      'overdue': technicianPMTasks.where((task) => task.isOverdue).length,
-    };
-
-    return {
-      'workOrders': technicianWorkOrders,
-      'pmTasks': technicianPMTasks,
-      'workOrderStats': workOrderStats,
-      'pmTaskStats': pmTaskStats,
-    };
-  }
-
-  /// Create work order
-  Future<String> createWorkOrder({
-    required String problemDescription,
-    required String requestorId,
-    String? assetId, // Made optional for general facility maintenance
-    Asset? asset, // Pass full asset object if available
-    String? location, // Location for general maintenance without asset
-    String? photoPath, // Deprecated: use photoPaths instead
-    List<String>? photoPaths, // Multiple photo URLs
-    WorkOrderPriority priority = WorkOrderPriority.medium,
-    RepairCategory? category,
-    List<String>? assignedTechnicianIds,
-    String? requestorName,
-    // Additional requestor details
-    String? customerName,
-    String? customerPhone,
-    String? customerEmail,
-    String? notes,
-  }) async {
-    try {
-      const uuid = Uuid();
-      final now = DateTime.now();
-      final workOrderId = uuid.v4();
-
-      // Generate ticket number
-      final ticketNumber =
-          'WO-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${totalWorkOrders + 1}';
-
-      // Upload photos to Supabase Storage if provided
-      List<String> uploadedPhotoUrls = [];
-
-      // Use photoPaths if provided, otherwise fall back to photoPath for backward compatibility
-      final photosToUpload =
-          photoPaths ?? (photoPath != null ? [photoPath] : <String>[]);
-
-      if (photosToUpload.isNotEmpty) {
-        final storageService = SupabaseStorageService();
-        for (int i = 0; i < photosToUpload.length; i++) {
-          try {
-            final photoUrl = photosToUpload[i];
-            // If it's already a URL (from previous upload), use it directly
-            if (photoUrl.startsWith('http://') ||
-                photoUrl.startsWith('https://')) {
-              uploadedPhotoUrls.add(photoUrl);
-              debugPrint('📤 Using existing photo URL: $photoUrl');
-            } else {
-              // Convert file path to XFile (web-compatible) and upload
-              final photoFile = XFile(photoUrl);
-              final uploadedUrl = await storageService.uploadWorkOrderPhoto(
-                photoFile: photoFile,
-                workOrderId: workOrderId,
-              );
-              if (uploadedUrl != null) {
-                uploadedPhotoUrls.add(uploadedUrl);
-                debugPrint('📤 Uploaded work order photo $i: $uploadedUrl');
-              }
-            }
-          } catch (e) {
-            debugPrint('⚠️ Failed to upload photo $i to Supabase Storage: $e');
-            // Continue with other photos even if one fails
-          }
-        }
-      }
-
-      // For backward compatibility, set photoPath to first photo if available
-      final finalPhotoPath =
-          uploadedPhotoUrls.isNotEmpty ? uploadedPhotoUrls.first : null;
-
-      // Get the asset to populate the reference (if assetId is provided)
-      // Use passed asset if available, otherwise look it up
-      if (asset == null && assetId != null) {
-        asset = assets.firstWhere(
-          (a) => a.id == assetId,
-          orElse: () => Asset(
-            id: assetId,
-            name: 'Unknown Asset',
-            location: '',
-            status: 'unknown',
-            category: '',
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          ),
-        );
-      }
-
-      // Get the requestor to check their role and company
-      final requestor = users.firstWhere(
-        (u) => u.id == requestorId,
-        orElse: () => User(
-          id: requestorId,
-          email: '',
-          name: 'Unknown User',
-          role: 'requestor',
-          createdAt: DateTime.now(),
-        ),
-      );
-
-      // Get companyId from requestor (required for multi-tenant isolation)
-      final companyId = requestor.companyId;
-      if (companyId == null && requestor.role == 'requestor') {
-        debugPrint('⚠️ Requestor ${requestor.id} has no companyId assigned');
-      }
-
-      final requestorRole = requestor.role.toLowerCase();
-      final assignedIds = <String>[];
-      List<User>? assignedTechnicians;
-
-      // Workflow: Requestors can only create OPEN work orders (unassigned)
-      // Only admins, managers, or technicians can assign technicians during creation
-      if (requestorRole == 'requestor') {
-        // Requestors cannot assign technicians - work order stays OPEN
-        // Ignore any assignedTechnicianIds passed (shouldn't happen, but safety check)
-        debugPrint(
-            '📋 Requestor creating work order - will remain OPEN (unassigned)');
-      } else if (requestorRole == 'admin' || requestorRole == 'manager') {
-        // Admins and managers can assign technicians during creation
-        void addTechnician(String? id) {
-          if (id != null && id.isNotEmpty && !assignedIds.contains(id)) {
-            assignedIds.add(id);
-          }
-        }
-
-        if (assignedTechnicianIds != null) {
-          for (final techId in assignedTechnicianIds) {
-            addTechnician(techId);
-          }
-        }
-        if (assignedIds.isNotEmpty) {
-          assignedTechnicians =
-              users.where((user) => assignedIds.contains(user.id)).toList();
-        }
-        debugPrint(
-            '👔 Admin/Manager creating work order - can assign technicians');
-      } else if (requestorRole == 'technician') {
-        // Technicians can auto-assign themselves when creating work orders
-        void addTechnician(String? id) {
-          if (id != null && id.isNotEmpty && !assignedIds.contains(id)) {
-            assignedIds.add(id);
-          }
-        }
-
-        if (assignedTechnicianIds != null) {
-          for (final techId in assignedTechnicianIds) {
-            addTechnician(techId);
-          }
-        }
-        // Auto-assign technician to themselves
-        addTechnician(requestorId);
-        if (assignedIds.isNotEmpty) {
-          assignedTechnicians =
-              users.where((user) => assignedIds.contains(user.id)).toList();
-        }
-        debugPrint('🔧 Technician creating work order - auto-assigned to self');
-      }
-
-      final workOrder = WorkOrder(
-        id: workOrderId,
-        ticketNumber: ticketNumber,
-        assetId: assetId,
-        asset: asset, // Populate asset reference
-        location: location, // For general maintenance
-        companyId: companyId, // Set companyId from requestor
-        problemDescription: problemDescription,
-        photoPath: finalPhotoPath, // Keep for backward compatibility
-        photoPaths: uploadedPhotoUrls.isNotEmpty ? uploadedPhotoUrls : null,
-        requestorId: requestorId,
-        requestor: requestor,
-        requestorName: requestorName ?? customerName,
-        primaryTechnicianId: assignedIds.isNotEmpty ? assignedIds.first : null,
-        assignedTechnicianIds: assignedIds,
-        assignedTechnicians: assignedTechnicians,
-        assignedAt: assignedIds.isNotEmpty ? now : null,
-        status: assignedIds.isNotEmpty
-            ? WorkOrderStatus.assigned
-            : WorkOrderStatus.open,
-        priority: priority,
-        category: category,
-        notes: notes, // Store additional notes/details
-        customerName: customerName,
-        customerPhone: customerPhone,
-        customerEmail: customerEmail,
-        createdAt: now,
-        isOffline: uploadedPhotoUrls.isEmpty && photoPath != null,
-        updatedAt: now,
-      );
-
-      final id = await _dataService.createWorkOrder(workOrder);
-
-      // Get the created work order from the service and add to real-time cache
-      final createdWorkOrder = _dataService.workOrders.firstWhere(
-        (wo) => wo.id == id,
-        orElse: () => workOrder,
-      );
-
-      // Populate references for the created work order
-      final populatedWorkOrder =
-          _populateWorkOrderReferences([createdWorkOrder]).first;
-
-      // Add to real-time cache if not already present
-      final existingIndex = _realtimeWorkOrders.indexWhere((wo) => wo.id == id);
-      if (existingIndex != -1) {
-        _realtimeWorkOrders[existingIndex] = populatedWorkOrder;
-      } else {
-        _realtimeWorkOrders.add(populatedWorkOrder);
-      }
-
-      notifyListeners();
-
-      if (requestorRole == 'requestor') {
-        debugPrint(
-            '✅ Work order created by requestor - Status: OPEN (awaiting assignment by admin/manager)');
-      } else {
-        debugPrint(
-          assignedIds.isNotEmpty
-              ? '✅ Work order assigned to ${assignedIds.length} technician(s)'
-              : '✅ Work order created as unassigned',
-        );
-      }
-
-      return id;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error creating work order: $e');
-      rethrow;
-    }
-  }
-
-  /// Update work order
-  Future<WorkOrder> updateWorkOrder(WorkOrder workOrder) async {
-    try {
-      final updatedWorkOrder = await _dataService.updateWorkOrder(workOrder);
-      // Update the real-time cache
-      final index = _realtimeWorkOrders.indexWhere(
-        (wo) => wo.id == updatedWorkOrder.id,
-      );
-      if (index != -1) {
-        _realtimeWorkOrders[index] = updatedWorkOrder;
-      } else {
-        _realtimeWorkOrders.add(updatedWorkOrder);
-      }
-      notifyListeners();
-      return updatedWorkOrder;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error updating work order: $e');
-      rethrow;
-    }
-  }
-
-  /// Update only the in-memory cache with a fresh server version (no DB write).
-  /// Use this to keep the list consistent after a detail-screen server fetch.
-  void updateCachedWorkOrder(WorkOrder workOrder) {
-    final index = _realtimeWorkOrders.indexWhere((wo) => wo.id == workOrder.id);
-    if (index != -1) {
-      _realtimeWorkOrders[index] = workOrder;
-    } else {
-      _realtimeWorkOrders.add(workOrder);
-    }
-    notifyListeners();
-  }
-
-  /// Load the next page of work orders from Supabase and append to the cache.
-  /// No-ops if already loading or if there are no more pages.
-  Future<void> loadMoreWorkOrders() async {
-    if (_isLoadingMoreWorkOrders || !_hasMoreWorkOrders || _isDisposed) return;
-
-    _isLoadingMoreWorkOrders = true;
-
-    try {
-      final fetched = await _dataService.appendWorkOrderPage(
-        _woNextPage,
-        pageSize: _woPageSize,
-      );
-
-      if (fetched < _woPageSize) {
-        // Server returned fewer rows than the page size → last page reached.
-        _hasMoreWorkOrders = false;
-      }
-
-      _woNextPage++;
-
-      // Refresh references for newly added rows and guard against any
-      // duplicate ids/ticket numbers across pages.
-      _realtimeWorkOrders =
-          _dedupeWorkOrders(_populateWorkOrderReferences(_realtimeWorkOrders));
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: loadMoreWorkOrders error: $e');
-    } finally {
-      _isLoadingMoreWorkOrders = false;
-      if (!_isDisposed) notifyListeners();
-    }
-  }
-
-  /// Reset pagination so the next initialize() re-fetches from page 0.
-  void _resetWorkOrderPagination() {
-    _woNextPage = 1;
-    _hasMoreWorkOrders = true;
-    _isLoadingMoreWorkOrders = false;
-  }
-
-  /// Delete work order
-  Future<void> deleteWorkOrder(String workOrderId) async {
-    try {
-      await _dataService.deleteWorkOrder(workOrderId);
-      _realtimeWorkOrders.removeWhere((wo) => wo.id == workOrderId);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error deleting work order: $e');
-      rethrow;
-    }
-  }
-
-  /// Reopen work order (for requestors)
-  /// Validates that:
-  /// - Work order exists
-  /// - Work order status is completed or closed
-  /// - Current user is the requestor
-  /// - Maximum reopen count hasn't been exceeded (default: 3)
-  Future<WorkOrder> reopenWorkOrder({
-    required String workOrderId,
-    required String currentUserId,
-    required String reason,
-    String? editedDescription,
-    int maxReopenCount = 3,
-  }) async {
-    try {
-      // Always fetch the latest work order from Supabase to ensure we have the current status
-      // This prevents issues where the cached version might be stale or already reopened
-      final fetchedWorkOrder =
-          await SupabaseDatabaseService.instance.getWorkOrder(workOrderId);
-
-      if (fetchedWorkOrder == null) {
-        throw Exception('Work order not found');
-      }
-
-      final workOrder = fetchedWorkOrder;
-
-      // Update cache with latest data before validation
-      final cacheIndex = _realtimeWorkOrders.indexWhere(
-        (wo) => wo.id == workOrderId,
-      );
-      if (cacheIndex != -1) {
-        _realtimeWorkOrders[cacheIndex] = workOrder;
-      } else {
-        _realtimeWorkOrders.add(workOrder);
-      }
-
-      debugPrint(
-          '🔍 UnifiedDataProvider: Checking work order ${workOrder.ticketNumber} status: ${workOrder.status.name}');
-
-      // Validation: Check status - must be completed, closed, or cancelled to reopen
-      if (workOrder.status != WorkOrderStatus.completed &&
-          workOrder.status != WorkOrderStatus.closed &&
-          workOrder.status != WorkOrderStatus.cancelled) {
-        throw Exception(
-          'Only completed, closed, or cancelled work orders can be reopened. Current status: ${workOrder.status.name}',
-        );
-      }
-
-      // Validation: Check reopen count (optional limit)
-      if (workOrder.reopenCount >= maxReopenCount) {
-        throw Exception(
-          'This work order has already been reopened ${workOrder.reopenCount} time(s). Maximum allowed: $maxReopenCount',
-        );
-      }
-
-      // Validation: Check if current user is the requestor
-      if (workOrder.requestorId != currentUserId) {
-        throw Exception(
-            'Only the requestor who created this work order can reopen it');
-      }
-
-      // Get current timestamp
-      final now = DateTime.now();
-
-      // Preserve previous completion data before resetting
-      final previousCompletionDate =
-          workOrder.completedAt ?? workOrder.closedAt;
-      final previousStatus = workOrder.status;
-
-      // Create updated work order with reset fields
-      final updatedWorkOrder = workOrder.copyWith(
-        // Set status to reopened (not open)
-        status: WorkOrderStatus.reopened,
-        // Clear assignments
-        assignedTechnicianIds: <String>[],
-        primaryTechnicianId: null,
-        assignedTechnicians: null,
-        assignedAt: null,
-        // Clear work timestamps (preserve original createdAt)
-        startedAt: null,
-        completedAt: null,
-        closedAt: null,
-        // Update problem description if edited
-        problemDescription: editedDescription ?? workOrder.problemDescription,
-        // Track reopen information
-        reopenedAt: now,
-        reopenedBy: currentUserId,
-        reopenReason: reason,
-        reopenCount: workOrder.reopenCount + 1,
-        previousCompletionDate: previousCompletionDate,
-        previousStatus: previousStatus,
-        // Update timestamp
-        updatedAt: now,
-        // Reset pause state
-        isPaused: false,
-        pausedAt: null,
-        pauseReason: null,
-        resumedAt: null,
-      );
-
-      debugPrint(
-          '🔄 UnifiedDataProvider: Reopening work order ${workOrder.ticketNumber}');
-      debugPrint('   - Previous status: ${previousStatus.name}');
-      debugPrint('   - Previous completion date: $previousCompletionDate');
-      debugPrint('   - Reopen reason: $reason');
-      debugPrint('   - Reopen count: ${updatedWorkOrder.reopenCount}');
-
-      // Update work order via data service
-      final reopenedWorkOrder =
-          await _dataService.updateWorkOrder(updatedWorkOrder);
-
-      // Update real-time cache immediately to ensure UI updates
-      final index = _realtimeWorkOrders.indexWhere(
-        (wo) => wo.id == reopenedWorkOrder.id,
-      );
-      if (index != -1) {
-        _realtimeWorkOrders[index] = reopenedWorkOrder;
-      } else {
-        _realtimeWorkOrders.add(reopenedWorkOrder);
-      }
-
-      // Notify listeners immediately so UI updates
-      notifyListeners();
-
-      // Wait a brief moment to ensure the update is processed
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      debugPrint(
-          '✅ UnifiedDataProvider: Work order ${workOrder.ticketNumber} reopened successfully');
-      debugPrint('   - New status: ${reopenedWorkOrder.status.name}');
-      debugPrint(
-          '   - Work order should now appear in Active tab, not History tab');
-
-      return reopenedWorkOrder;
-    } catch (e) {
-      debugPrint('❌ UnifiedDataProvider: Error reopening work order: $e');
-      rethrow;
-    }
-  }
-
-  /// Create user
-  Future<String> createUser(User user) async {
-    try {
-      final id = await _dataService.createUser(user);
-      final createdUser = user.copyWith(id: id);
-      final index = _realtimeUsers.indexWhere((u) => u.id == id);
-      if (index != -1) {
-        _realtimeUsers[index] = createdUser;
-      } else {
-        _realtimeUsers.add(createdUser);
-      }
-      notifyListeners();
-      return id;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error creating user: $e');
-      rethrow;
-    }
-  }
-
-  /// Update user
-  Future<void> updateUser(User user) async {
-    try {
-      await _dataService.updateUser(user);
-      // Keep _realtimeUsers in sync so UI shows new role immediately (provider.users returns _realtimeUsers when non-empty)
-      final index = _realtimeUsers.indexWhere((u) => u.id == user.id);
-      if (index != -1) {
-        _realtimeUsers[index] = user;
-      } else {
-        _realtimeUsers.add(user);
-      }
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error updating user: $e');
-      rethrow;
-    }
-  }
-
-  /// Delete user
-  /// [currentUserRole] - Role of the user performing the deletion (for validation)
-  /// [currentUserId] - ID of the user performing the deletion (for validation)
-  Future<void> deleteUser(
-    String userId, {
-    String? currentUserRole,
-    String? currentUserId,
-  }) async {
-    try {
-      // Validate: Can't delete yourself
-      if (currentUserId != null && currentUserId == userId) {
-        throw Exception('You cannot delete your own account');
-      }
-
-      // Get user to check role - check both real-time cache and data service
-      User user;
-      try {
-        user = users.firstWhere((u) => u.id == userId);
-      } catch (e) {
-        // If not in cache, try fetching from Supabase directly
-        final fetchedUser =
-            await SupabaseDatabaseService.instance.getUserById(userId);
-        if (fetchedUser == null) {
-          throw Exception('User not found');
-        }
-        user = fetchedUser;
-      }
-
-      // Validate: Can't delete admins or managers (unless you're an admin)
-      if ((user.role == 'admin' || user.role == 'manager') &&
-          currentUserRole != 'admin') {
-        throw Exception(
-          'Only administrators can delete ${user.role}s',
-        );
-      }
-
-      await _dataService.deleteUser(userId);
-
-      // Remove from real-time cache if exists
-      _realtimeUsers.removeWhere((u) => u.id == userId);
-
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error deleting user: $e');
-      rethrow;
-    }
-  }
-
-  /// Assign technician to work order
-  Future<void> assignTechnicianToWorkOrder(
-    String workOrderId,
-    String technicianId,
-  ) async {
-    try {
-      await _dataService.assignTechnicianToWorkOrder(workOrderId, technicianId);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error assigning technician: $e');
-      rethrow;
-    }
-  }
-
-  Future<void> updateWorkOrderTechnicians(
-    String workOrderId,
-    List<String> technicianIds,
-  ) async {
-    try {
-      await _dataService.updateWorkOrderTechnicianAssignments(
-        workOrderId,
-        technicianIds,
-      );
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error updating technicians: $e');
-      rethrow;
-    }
-  }
-
-  /// Unassign technician from work order
-  Future<void> unassignTechnicianFromWorkOrder(
-    String workOrderId, {
-    String? technicianId,
-  }) async {
-    try {
-      await _dataService.unassignTechnicianFromWorkOrder(
-        workOrderId,
-        technicianId: technicianId,
-      );
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error unassigning technician: $e');
-      rethrow;
-    }
-  }
-
-  /// Create PM task
-  Future<void> createPMTask({
-    required String taskName,
-    String assetId = '', // Optional - can be empty for general PM tasks
-    required String description,
-    required String checklistJson,
-    required PMTaskFrequency frequency,
-    required DateTime nextDue,
-    Asset? asset, // Pass full asset object if available
-    List<String>? assignedTechnicianIds,
-    String? createdById, // Track who created this PM task
-  }) async {
-    try {
-      final finalAssignedIds = <String>[];
-      if (assignedTechnicianIds != null) {
-        finalAssignedIds
-            .addAll(assignedTechnicianIds.where((id) => id.isNotEmpty));
-      }
-
-      debugPrint(
-        '🔍 Creating PM task - assignedTechnicianIds: $assignedTechnicianIds, createdById: $createdById',
-      );
-      debugPrint('🔍 Available users: ${users.length}');
-      for (final user in users) {
-        debugPrint(
-          '   - User: ${user.name} (${user.email}), ID: ${user.id}, Role: ${user.role}',
-        );
-      }
-
-      if (finalAssignedIds.isEmpty && createdById != null) {
-        final creator = users.firstWhere(
-          (u) => u.id == createdById,
-          orElse: () => User(
-            id: createdById,
-            email: '',
-            name: 'Unknown User',
-            role: 'requestor',
-            createdAt: DateTime.now(),
-          ),
-        );
-
-        debugPrint(
-          '🔍 Creator found: ${creator.name}, role: ${creator.role}, ID: ${creator.id}',
-        );
-
-        // Auto-assign to creator if they're a technician
-        if (creator.role == 'technician') {
-          finalAssignedIds.add(createdById);
-          debugPrint(
-            '✅ Auto-assigning PM task to creator: ${creator.name} (ID: $createdById)',
-          );
-        }
-      }
-
-      debugPrint('🔍 Final assigned technician IDs: $finalAssignedIds');
-
-      final createdPMTask = await _dataService.createPMTask(
-        taskName: taskName,
-        assetId: assetId,
-        asset: asset, // Pass full asset object
-        description: description,
-        checklistJson: checklistJson,
-        frequency: frequency,
-        nextDue: nextDue,
-        assignedTechnicianIds: finalAssignedIds,
-        createdById: createdById, // Pass creator ID to service
-      );
-      final populatedList = _populatePMTaskReferences([createdPMTask]);
-      final populated = populatedList.isNotEmpty ? populatedList.first : createdPMTask;
-      final existingIndex = _realtimePMTasks.indexWhere((pm) => pm.id == populated.id);
-      if (existingIndex != -1) {
-        _realtimePMTasks[existingIndex] = populated;
-      } else {
-        _realtimePMTasks.add(populated);
-      }
-      notifyListeners();
-
-      debugPrint('✅ PM task created and listeners notified');
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error creating PM task: $e');
-      rethrow;
-    }
-  }
-
-  /// Update PM task
-  Future<PMTask> updatePMTask(PMTask pmTask) async {
-    try {
-      final updatedPMTask = await _dataService.updatePMTask(pmTask);
-      // Update the real-time cache
-      final index = _realtimePMTasks.indexWhere(
-        (pm) => pm.id == updatedPMTask.id,
-      );
-      if (index != -1) {
-        _realtimePMTasks[index] = updatedPMTask;
-      } else {
-        _realtimePMTasks.add(updatedPMTask);
-      }
-      notifyListeners();
-      return updatedPMTask;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error updating PM task: $e');
-      rethrow;
-    }
-  }
-
-  /// Delete PM task
-  Future<void> deletePMTask(String pmTaskId) async {
-    try {
-      await _dataService.deletePMTask(pmTaskId);
-      _realtimePMTasks.removeWhere((pm) => pm.id == pmTaskId);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error deleting PM task: $e');
-      rethrow;
-    }
-  }
-
-  /// Assign technician to PM task
-  Future<void> assignPMTaskTechnician(
-    String pmTaskId,
-    String technicianId,
-  ) async {
-    try {
-      await _dataService.assignTechnicianToPMTask(pmTaskId, technicianId);
-      notifyListeners();
-    } catch (e) {
-      debugPrint(
-        'UnifiedDataProvider: Error assigning technician to PM task: $e',
-      );
-      rethrow;
-    }
-  }
-
-  Future<void> updatePMTaskTechnicians(
-    String pmTaskId,
-    List<String> technicianIds,
-  ) async {
-    try {
-      await _dataService.updatePMTaskTechnicianAssignments(
-        pmTaskId,
-        technicianIds,
-      );
-      notifyListeners();
-    } catch (e) {
-      debugPrint(
-        'UnifiedDataProvider: Error updating PM task technicians: $e',
-      );
-      rethrow;
-    }
-  }
-
-  /// Unassign technician from PM task
-  Future<void> unassignPMTaskTechnician(
-    String pmTaskId, {
-    String? technicianId,
-  }) async {
-    try {
-      await _dataService.unassignTechnicianFromPMTask(
-        pmTaskId,
-        technicianId: technicianId,
-      );
-      notifyListeners();
-    } catch (e) {
-      debugPrint(
-        'UnifiedDataProvider: Error unassigning technician from PM task: $e',
-      );
-      rethrow;
-    }
-  }
-
-  /// Alias methods for work order technician assignment (shorter names)
-  Future<void> assignTechnician(String workOrderId, String technicianId) =>
-      assignTechnicianToWorkOrder(workOrderId, technicianId);
-
-  Future<void> unassignTechnician(
-    String workOrderId, {
-    String? technicianId,
-  }) =>
-      unassignTechnicianFromWorkOrder(workOrderId, technicianId: technicianId);
-
-  /// Get dashboard statistics - NOW USING REAL-TIME DATA!
-  Map<String, dynamic> getDashboardStats() => {
-        'totalWorkOrders': workOrders.length,
-        'openWorkOrders': workOrders.where((wo) => wo.isOpen).length,
-        'inProgressWorkOrders':
-            workOrders.where((wo) => wo.isInProgress).length,
-        'completedWorkOrders': workOrders.where((wo) => wo.isCompleted).length,
-        'overdueWorkOrders': workOrders.where((wo) => wo.isOverdue).length,
-        'highPriorityWorkOrders':
-            workOrders.where((wo) => wo.isHighPriority).length,
-        'totalPMTasks': pmTasks.length,
-        'pendingPMTasks': pendingPMTasks,
-        'duePMTasks': duePMTasks,
-        'overduePMTasks': overduePMTasks,
-        'completedPMTasks': completedPMTasks,
-        'completedWorkOrdersToday': completedWorkOrdersToday,
-        'totalUsers': users.length,
-        'technicians': users.where((user) => user.role == 'technician').length,
-        'totalAssets': assets.length,
-        'totalInventory': inventoryItems.length,
-        'lowStockItems':
-            inventoryItems.where((item) => item.quantity <= 10).length,
-        'totalWorkflows': workflows.length,
-        'pendingApprovalWorkflows':
-            workflows.where((w) => w.isPendingApproval).length,
-        'approvedWorkflows': workflows.where((w) => w.isApproved).length,
-        'completedWorkflows': workflows.where((w) => w.isCompleted).length,
-        'overdueWorkflows': workflows.where((w) => w.isOverdue).length,
-      };
-
-  /// Get technician-specific dashboard data - NOW USING REAL-TIME DATA!
   Map<String, dynamic> getTechnicianDashboardData(String technicianId) {
-    final technicianWorkOrders = getWorkOrdersByTechnician(technicianId);
-    final technicianPMTasks = getPMTasksByTechnician(technicianId);
-
+    final performance = getTechnicianPerformance(technicianId);
+    final technicianPMTasks = performance['pmTasks'] as List<PMTask>;
     return {
-      'workOrders': technicianWorkOrders,
-      'pmTasks': technicianPMTasks,
-      'workOrderStats': {
-        'total': technicianWorkOrders.length,
-        'open': technicianWorkOrders.where((wo) => wo.isOpen).length,
-        'inProgress':
-            technicianWorkOrders.where((wo) => wo.isInProgress).length,
-        'completed': technicianWorkOrders.where((wo) => wo.isCompleted).length,
-        'overdue': technicianWorkOrders.where((wo) => wo.isOverdue).length,
-      },
+      ...performance,
       'pmTaskStats': {
-        'total': technicianPMTasks.length,
+      'total': technicianPMTasks.length,
         'pending': technicianPMTasks
             .where((task) => task.status.toString().contains('pending'))
             .length,
@@ -1556,464 +231,310 @@ class UnifiedDataProvider with ChangeNotifier {
     };
   }
 
-  /// Get work order by ID - NOW USING REAL-TIME DATA!
-  WorkOrder? getWorkOrderById(String id) {
-    try {
-      return workOrders.firstWhere((wo) => wo.id == id);
-    } catch (e) {
-      return null;
-    }
-  }
+  WorkOrder? getWorkOrderById(String id) => _workOrders.getWorkOrderById(id);
+  User? getUserById(String id) => _users.getUserById(id);
+  User? getUserByEmail(String email) => _users.getUserByEmail(email);
 
-  /// Get user by ID - NOW USING REAL-TIME DATA!
-  User? getUserById(String id) {
-    try {
-      return users.firstWhere((user) => user.id == id);
-    } catch (e) {
-      return null;
-    }
-  }
+  Map<String, dynamic> getDashboardStats() => {
+        'totalWorkOrders': totalWorkOrders,
+        'openWorkOrders': openWorkOrders,
+        'inProgressWorkOrders': inProgressWorkOrders,
+        'completedWorkOrders': completedWorkOrders,
+        'overdueWorkOrders': overdueWorkOrders,
+        'highPriorityWorkOrders': highPriorityWorkOrders,
+        'totalPMTasks': totalPMTasks,
+        'pendingPMTasks': pendingPMTasks,
+        'duePMTasks': duePMTasks,
+        'overduePMTasks': overduePMTasks,
+        'completedPMTasks': completedPMTasks,
+        'completedWorkOrdersToday': completedWorkOrdersToday,
+        'totalUsers': totalUsers,
+        'technicians': technicians,
+        'totalAssets': totalAssets,
+        'totalInventory': totalInventory,
+        'lowStockItems': lowStockItems,
+        'totalWorkflows': totalWorkflows,
+        'pendingApprovalWorkflows': pendingApprovalWorkflows,
+        'approvedWorkflows': approvedWorkflows,
+        'completedWorkflows': completedWorkflows,
+        'overdueWorkflows': overdueWorkflows,
+      };
 
-  /// Get user by email - NOW USING REAL-TIME DATA!
-  User? getUserByEmail(String email) {
-    try {
-      return users.firstWhere((user) => user.email == email);
-    } catch (e) {
-      return null;
-    }
-  }
+  // ── Work order mutations ───────────────────────────────────────────────────
 
-  /// Pause a work order with reason
-  Future<WorkOrder> pauseWorkOrder(String workOrderId, String reason) async {
-    try {
-      final updatedWorkOrder =
-          await _dataService.pauseWorkOrder(workOrderId, reason);
-      // Update real-time cache if it exists there
-      final realtimeIndex = _realtimeWorkOrders.indexWhere(
-        (wo) => wo.id == workOrderId,
+  Future<String> createWorkOrder({
+    required String problemDescription,
+    required String requestorId,
+    String? assetId,
+    Asset? asset,
+    String? location,
+    String? photoPath,
+    List<String>? photoPaths,
+    WorkOrderPriority priority = WorkOrderPriority.medium,
+    RepairCategory? category,
+    List<String>? assignedTechnicianIds,
+    String? requestorName,
+    String? customerName,
+    String? customerPhone,
+    String? customerEmail,
+    String? notes,
+  }) =>
+      _workOrders.createWorkOrder(
+        problemDescription: problemDescription,
+        requestorId: requestorId,
+        assetId: assetId,
+        asset: asset,
+        location: location,
+        photoPath: photoPath,
+        photoPaths: photoPaths,
+        priority: priority,
+        category: category,
+        assignedTechnicianIds: assignedTechnicianIds,
+        requestorName: requestorName,
+        customerName: customerName,
+        customerPhone: customerPhone,
+        customerEmail: customerEmail,
+        notes: notes,
       );
-      if (realtimeIndex != -1) {
-        _realtimeWorkOrders[realtimeIndex] = updatedWorkOrder;
-      }
-      notifyListeners();
-      return updatedWorkOrder;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error pausing work order: $e');
-      rethrow;
-    }
-  }
 
-  /// Resume a paused work order
-  Future<WorkOrder> resumeWorkOrder(String workOrderId) async {
-    try {
-      final updatedWorkOrder = await _dataService.resumeWorkOrder(workOrderId);
-      // Update real-time cache if it exists there
-      final realtimeIndex = _realtimeWorkOrders.indexWhere(
-        (wo) => wo.id == workOrderId,
+  Future<WorkOrder> updateWorkOrder(WorkOrder workOrder) =>
+      _workOrders.updateWorkOrder(workOrder);
+
+  Future<WorkOrder> completeWorkOrder(
+    WorkOrder workOrder, {
+    List<String> pendingLocalPhotoPaths = const [],
+  }) =>
+      _workOrders.completeWorkOrder(
+        workOrder,
+        pendingLocalPhotoPaths: pendingLocalPhotoPaths,
       );
-      if (realtimeIndex != -1) {
-        _realtimeWorkOrders[realtimeIndex] = updatedWorkOrder;
-      }
-      notifyListeners();
-      return updatedWorkOrder;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error resuming work order: $e');
-      rethrow;
-    }
-  }
 
-  /// Pause a PM task with reason
-  Future<PMTask> pausePMTask(String pmTaskId, String reason) async {
-    try {
-      final updatedPMTask = await _dataService.pausePMTask(pmTaskId, reason);
-      // Update real-time cache if it exists there
-      final realtimeIndex = _realtimePMTasks.indexWhere(
-        (pm) => pm.id == pmTaskId,
+  void updateCachedWorkOrder(WorkOrder workOrder) =>
+      _workOrders.updateCachedWorkOrder(workOrder);
+
+  Future<void> loadMoreWorkOrders() => _workOrders.loadMoreWorkOrders();
+
+  Future<void> deleteWorkOrder(String workOrderId) =>
+      _workOrders.deleteWorkOrder(workOrderId);
+
+  Future<WorkOrder> reopenWorkOrder({
+    required String workOrderId,
+    required String currentUserId,
+    required String reason,
+    String? editedDescription,
+    int maxReopenCount = 3,
+  }) =>
+      _workOrders.reopenWorkOrder(
+        workOrderId: workOrderId,
+        currentUserId: currentUserId,
+        reason: reason,
+        editedDescription: editedDescription,
+        maxReopenCount: maxReopenCount,
       );
-      if (realtimeIndex != -1) {
-        _realtimePMTasks[realtimeIndex] = updatedPMTask;
-      }
-      notifyListeners();
-      return updatedPMTask;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error pausing PM task: $e');
-      rethrow;
-    }
-  }
 
-  /// Resume a paused PM task
-  Future<PMTask> resumePMTask(String pmTaskId) async {
-    try {
-      final updatedPMTask = await _dataService.resumePMTask(pmTaskId);
-      // Update real-time cache if it exists there
-      final realtimeIndex = _realtimePMTasks.indexWhere(
-        (pm) => pm.id == pmTaskId,
+  Future<void> assignTechnicianToWorkOrder(
+    String workOrderId,
+    String technicianId,
+  ) =>
+      _workOrders.assignTechnicianToWorkOrder(workOrderId, technicianId);
+
+  Future<void> updateWorkOrderTechnicians(
+    String workOrderId,
+    List<String> technicianIds,
+  ) =>
+      _workOrders.updateWorkOrderTechnicians(workOrderId, technicianIds);
+
+  Future<void> unassignTechnicianFromWorkOrder(
+    String workOrderId, {
+    String? technicianId,
+  }) =>
+      _workOrders.unassignTechnicianFromWorkOrder(
+        workOrderId,
+        technicianId: technicianId,
       );
-      if (realtimeIndex != -1) {
-        _realtimePMTasks[realtimeIndex] = updatedPMTask;
-      }
-      notifyListeners();
-      return updatedPMTask;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error resuming PM task: $e');
-      rethrow;
-    }
-  }
 
-  // ============================================================================
-  // WORKFLOW OPERATIONS
-  // ============================================================================
+  Future<void> assignTechnician(String workOrderId, String technicianId) =>
+      assignTechnicianToWorkOrder(workOrderId, technicianId);
 
-  /// Create workflow
-  Future<String> createWorkflow(Workflow workflow) async {
-    try {
-      final workflowId = await _dataService.createWorkflow(workflow);
-      notifyListeners();
-      return workflowId;
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error creating workflow: $e');
-      rethrow;
-    }
-  }
+  Future<void> unassignTechnician(
+    String workOrderId, {
+    String? technicianId,
+  }) =>
+      unassignTechnicianFromWorkOrder(workOrderId, technicianId: technicianId);
 
-  /// Update workflow
-  Future<void> updateWorkflow(Workflow workflow) async {
-    try {
-      await _dataService.updateWorkflow(workflow);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error updating workflow: $e');
-      rethrow;
-    }
-  }
+  Future<WorkOrder> pauseWorkOrder(String workOrderId, String reason) =>
+      _workOrders.pauseWorkOrder(workOrderId, reason);
 
-  /// Delete workflow
-  Future<void> deleteWorkflow(String workflowId) async {
-    try {
-      await _dataService.deleteWorkflow(workflowId);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error deleting workflow: $e');
-      rethrow;
-    }
-  }
+  Future<WorkOrder> resumeWorkOrder(String workOrderId) =>
+      _workOrders.resumeWorkOrder(workOrderId);
 
-  /// Get workflow by ID
+  // ── User mutations ─────────────────────────────────────────────────────────
+
+  Future<String> createUser(User user) => _users.createUser(user);
+  Future<void> updateUser(User user) => _users.updateUser(user);
+
+  Future<void> deleteUser(
+    String userId, {
+    String? currentUserRole,
+    String? currentUserId,
+  }) =>
+      _users.deleteUser(
+        userId,
+        currentUserRole: currentUserRole,
+        currentUserId: currentUserId,
+      );
+
+  // ── PM task mutations ──────────────────────────────────────────────────────
+
+  Future<void> createPMTask({
+    required String taskName,
+    String assetId = '',
+    required String description,
+    required String checklistJson,
+    required PMTaskFrequency frequency,
+    required DateTime nextDue,
+    Asset? asset,
+    List<String>? assignedTechnicianIds,
+    String? createdById,
+  }) =>
+      _workOrders.createPMTask(
+        taskName: taskName,
+        assetId: assetId,
+        description: description,
+        checklistJson: checklistJson,
+        frequency: frequency,
+        nextDue: nextDue,
+        asset: asset,
+        assignedTechnicianIds: assignedTechnicianIds,
+        createdById: createdById,
+      );
+
+  Future<PMTask> updatePMTask(PMTask pmTask) =>
+      _workOrders.updatePMTask(pmTask);
+
+  Future<void> deletePMTask(String pmTaskId) =>
+      _workOrders.deletePMTask(pmTaskId);
+
+  Future<void> assignPMTaskTechnician(
+    String pmTaskId,
+    String technicianId,
+  ) =>
+      _workOrders.assignPMTaskTechnician(pmTaskId, technicianId);
+
+  Future<void> updatePMTaskTechnicians(
+    String pmTaskId,
+    List<String> technicianIds,
+  ) =>
+      _workOrders.updatePMTaskTechnicians(pmTaskId, technicianIds);
+
+  Future<void> unassignPMTaskTechnician(
+    String pmTaskId, {
+    String? technicianId,
+  }) =>
+      _workOrders.unassignPMTaskTechnician(
+        pmTaskId,
+        technicianId: technicianId,
+      );
+
+  Future<PMTask> pausePMTask(String pmTaskId, String reason) =>
+      _workOrders.pausePMTask(pmTaskId, reason);
+
+  Future<PMTask> resumePMTask(String pmTaskId) =>
+      _workOrders.resumePMTask(pmTaskId);
+
+  // ── Workflow mutations ───────────────────────────────────────────────────────
+
+  Future<String> createWorkflow(Workflow workflow) =>
+      _workflows.createWorkflowRecord(workflow);
+
+  Future<void> updateWorkflow(Workflow workflow) =>
+      _workflows.updateWorkflowRecord(workflow);
+
+  Future<void> deleteWorkflow(String workflowId) =>
+      _workflows.deleteWorkflowRecord(workflowId);
+
   Workflow? getWorkflowById(String workflowId) =>
-      _dataService.getWorkflowById(workflowId);
+      _workflows.getWorkflowById(workflowId);
 
-  /// Get workflows by status
   List<Workflow> getWorkflowsByStatus(WorkflowStatus status) =>
-      _dataService.getWorkflowsByStatus(status);
+      _workflows.getWorkflowsByStatus(status);
 
-  /// Get workflows by type
   List<Workflow> getWorkflowsByType(WorkflowType type) =>
-      _dataService.getWorkflowsByType(type);
+      _workflows.getWorkflowsByType(type);
 
-  /// Get workflows created by user
   List<Workflow> getWorkflowsByCreator(String userId) =>
-      _dataService.getWorkflowsByCreator(userId);
+      _workflows.getWorkflowsByCreator(userId);
 
-  /// Get workflows assigned to user
   List<Workflow> getWorkflowsByAssignee(String userId) =>
-      _dataService.getWorkflowsByAssignee(userId);
+      _workflows.getWorkflowsByAssignee(userId);
 
-  /// Get pending approvals for user
   List<Workflow> getPendingApprovalsForUser(String userId) =>
-      _dataService.getPendingApprovalsForUser(userId);
+      _workflows.getPendingApprovalsForUserId(userId);
 
-  /// Get overdue workflows
-  List<Workflow> getOverdueWorkflows() => _dataService.getOverdueWorkflows();
+  List<Workflow> getOverdueWorkflows() => _workflows.getOverdueWorkflows();
 
-  /// Approve workflow
   Future<void> approveWorkflow({
     required String workflowId,
     required String approverId,
     required String approverName,
     required String approverRole,
     String? comments,
-  }) async {
-    try {
-      await _dataService.approveWorkflow(
+  }) =>
+      _workflows.approveWorkflowRecord(
         workflowId: workflowId,
         approverId: approverId,
         approverName: approverName,
         approverRole: approverRole,
         comments: comments,
       );
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error approving workflow: $e');
-      rethrow;
-    }
-  }
 
-  /// Reject workflow
   Future<void> rejectWorkflow({
     required String workflowId,
     required String rejectorId,
     required String rejectorName,
     required String rejectorRole,
     required String reason,
-  }) async {
-    try {
-      await _dataService.rejectWorkflow(
+  }) =>
+      _workflows.rejectWorkflowRecord(
         workflowId: workflowId,
         rejectorId: rejectorId,
         rejectorName: rejectorName,
         rejectorRole: rejectorRole,
         reason: reason,
       );
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error rejecting workflow: $e');
-      rethrow;
-    }
-  }
 
-  /// Complete workflow
   Future<void> completeWorkflow({
     required String workflowId,
     required String completedBy,
     String? comments,
-  }) async {
-    try {
-      await _dataService.completeWorkflow(
+  }) =>
+      _workflows.completeWorkflowRecord(
         workflowId: workflowId,
         completedBy: completedBy,
         comments: comments,
       );
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error completing workflow: $e');
-      rethrow;
-    }
-  }
 
-  /// Cancel workflow
   Future<void> cancelWorkflow({
     required String workflowId,
     required String cancelledBy,
     required String reason,
-  }) async {
-    try {
-      await _dataService.cancelWorkflow(
+  }) =>
+      _workflows.cancelWorkflowRecord(
         workflowId: workflowId,
         cancelledBy: cancelledBy,
         reason: reason,
       );
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error cancelling workflow: $e');
-      rethrow;
-    }
-  }
 
-  /// Escalate workflow
   Future<void> escalateWorkflow({
     required String workflowId,
     required String escalatedBy,
     String? reason,
-  }) async {
-    try {
-      await _dataService.escalateWorkflow(
+  }) =>
+      _workflows.escalateWorkflowRecord(
         workflowId: workflowId,
         escalatedBy: escalatedBy,
         reason: reason,
       );
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error escalating workflow: $e');
-      rethrow;
-    }
-  }
 
-  /// Refresh workflows
-  Future<void> refreshWorkflows() async {
-    try {
-      await _dataService.refreshWorkflows();
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error refreshing workflows: $e');
-    }
-  }
-
-  // ============================================================================
-  // REFERENCE POPULATION FOR REAL-TIME DATA
-  // ============================================================================
-
-  /// Populate user and asset references in work orders from real-time data
-  List<WorkOrder> _populateWorkOrderReferences(
-    List<WorkOrder> workOrders, {
-    Set<String>? missingUserIds,
-    Set<String>? missingAssetIds,
-  }) {
-    final populatedWorkOrders = <WorkOrder>[];
-
-    for (final workOrder in workOrders) {
-      var updatedWorkOrder = workOrder;
-
-      // Populate asset reference
-      if (updatedWorkOrder.asset == null &&
-          (updatedWorkOrder.assetId?.isNotEmpty ?? false)) {
-        try {
-          final asset = _realtimeAssets.firstWhere(
-            (a) => a.id == updatedWorkOrder.assetId,
-          );
-          updatedWorkOrder = updatedWorkOrder.copyWith(asset: asset);
-        } catch (e) {
-          // Asset not found - leave as null
-          debugPrint('⚠️ Asset ${updatedWorkOrder.assetId} not found');
-          final assetId = updatedWorkOrder.assetId;
-          if (assetId != null && assetId.isNotEmpty) {
-            missingAssetIds?.add(assetId);
-          }
-        }
-      }
-
-      // Populate assigned technician references
-      if (updatedWorkOrder.assignedTechnicianIds.isNotEmpty) {
-        final technicians = <User>[];
-        for (final techId in updatedWorkOrder.assignedTechnicianIds) {
-          try {
-            final technician = _realtimeUsers.firstWhere(
-              (u) => u.id == techId,
-            );
-            technicians.add(technician);
-          } catch (e) {
-            debugPrint(
-                '⚠️ Technician $techId not found for WO ${updatedWorkOrder.id}');
-            missingUserIds?.add(techId);
-          }
-        }
-        if (technicians.isNotEmpty) {
-          updatedWorkOrder =
-              updatedWorkOrder.copyWith(assignedTechnicians: technicians);
-        }
-      }
-
-      // Populate requestor reference
-      if (updatedWorkOrder.requestor == null &&
-          updatedWorkOrder.requestorId.isNotEmpty) {
-        try {
-          final requestor = _realtimeUsers.firstWhere(
-            (u) => u.id == updatedWorkOrder.requestorId,
-          );
-          updatedWorkOrder = updatedWorkOrder.copyWith(requestor: requestor);
-        } catch (e) {
-          // User not found - leave as null
-          debugPrint('⚠️ Requestor ${updatedWorkOrder.requestorId} not found');
-          if (updatedWorkOrder.requestorId.isNotEmpty) {
-            missingUserIds?.add(updatedWorkOrder.requestorId);
-          }
-        }
-      }
-
-      populatedWorkOrders.add(updatedWorkOrder);
-    }
-
-    return populatedWorkOrders;
-  }
-
-  /// Populate user and asset references in PM tasks from real-time data
-  List<PMTask> _populatePMTaskReferences(
-    List<PMTask> pmTasks, {
-    Set<String>? missingUserIds,
-    Set<String>? missingAssetIds,
-  }) {
-    final populatedPMTasks = <PMTask>[];
-
-    for (final pmTask in pmTasks) {
-      var updatedPMTask = pmTask;
-
-      // Populate asset reference
-      if (updatedPMTask.asset == null && updatedPMTask.assetId.isNotEmpty) {
-        try {
-          final asset = _realtimeAssets.firstWhere(
-            (a) => a.id == updatedPMTask.assetId,
-          );
-          updatedPMTask = updatedPMTask.copyWith(asset: asset);
-        } catch (e) {
-          // Asset not found - leave as null
-          debugPrint('⚠️ Asset ${updatedPMTask.assetId} not found');
-          if (updatedPMTask.assetId.isNotEmpty) {
-            missingAssetIds?.add(updatedPMTask.assetId);
-          }
-        }
-      }
-
-      // Populate creator reference
-      if (updatedPMTask.createdBy == null &&
-          updatedPMTask.createdById != null &&
-          updatedPMTask.createdById!.isNotEmpty) {
-        try {
-          final creator = _realtimeUsers.firstWhere(
-            (u) => u.id == updatedPMTask.createdById,
-          );
-          updatedPMTask = updatedPMTask.copyWith(createdBy: creator);
-        } catch (e) {
-          // Creator not found - leave as null
-          debugPrint('⚠️ Creator ${updatedPMTask.createdById} not found');
-        }
-      }
-
-      // Populate assigned technician references
-      if (updatedPMTask.assignedTechnicianIds.isNotEmpty) {
-        final technicians = <User>[];
-        for (final techId in updatedPMTask.assignedTechnicianIds) {
-          try {
-            final technician = _realtimeUsers.firstWhere(
-              (u) => u.id == techId,
-            );
-            technicians.add(technician);
-          } catch (e) {
-            debugPrint(
-                '⚠️ Technician $techId not found for PM ${updatedPMTask.id}');
-            missingUserIds?.add(techId);
-          }
-        }
-        if (technicians.isNotEmpty) {
-          updatedPMTask =
-              updatedPMTask.copyWith(assignedTechnicians: technicians);
-        }
-      }
-
-      populatedPMTasks.add(updatedPMTask);
-    }
-
-    return populatedPMTasks;
-  }
-
-  Future<void> _recoverMissingReferences({
-    Set<String>? userIds,
-    Set<String>? assetIds,
-  }) async {
-    final futures = <Future<bool>>[];
-    if (userIds != null && userIds.isNotEmpty) {
-      futures.add(_dataService.ensureUsersLoaded(userIds));
-    }
-    if (assetIds != null && assetIds.isNotEmpty) {
-      futures.add(_dataService.ensureAssetsLoaded(assetIds));
-    }
-    if (futures.isEmpty) return;
-
-    try {
-      final results = await Future.wait(futures);
-      // Only rebuild when something new landed — otherwise missing requestor
-      // profiles under get_user_by_id Forbidden spam an infinite recover loop.
-      if (!results.any((loaded) => loaded)) return;
-
-      if (_realtimeWorkOrders.isNotEmpty) {
-        _realtimeWorkOrders = _populateWorkOrderReferences(
-          _realtimeWorkOrders,
-        );
-      }
-      if (_realtimePMTasks.isNotEmpty) {
-        _realtimePMTasks = _populatePMTaskReferences(_realtimePMTasks);
-      }
-      notifyListeners();
-    } catch (e) {
-      debugPrint('UnifiedDataProvider: Error recovering references: $e');
-    }
-  }
+  Future<void> refreshWorkflows() => _workflows.refreshWorkflows();
 }

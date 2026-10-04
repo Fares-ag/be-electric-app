@@ -3,14 +3,18 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/app_config.dart';
+import '../../config/locator.dart';
 import '../../models/asset.dart';
 import '../../models/pm_task.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
+import '../../services/connectivity_service.dart';
 import '../../screens/assets/enhanced_asset_details_screen.dart';
 import '../../utils/app_theme.dart';
 import '../../widgets/enhanced_asset_display_widget.dart';
 import '../../widgets/enhanced_asset_selection_widget.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CreatePMTaskScreen extends StatefulWidget {
   const CreatePMTaskScreen({super.key, this.initialAsset});
@@ -217,6 +221,9 @@ class _CreatePMTaskScreenState extends State<CreatePMTaskScreen> {
           ? (description.length > 50 ? '${description.substring(0, 50)}...' : description)
           : 'PM Task';
       
+      final wasOffline = AppConfig.isOfflineModeEnabled &&
+          !sl<ConnectivityService>().isOnline;
+
       await unifiedProvider.createPMTask(
         taskName: taskName,
         assetId: assetIdForCreation, // Empty string for general facility tasks
@@ -236,20 +243,26 @@ class _CreatePMTaskScreenState extends State<CreatePMTaskScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('PM task created successfully'),
+          SnackBar(
+            content: Text(
+              wasOffline
+                  ? 'PM task saved locally — will sync when online'
+                  : 'PM task created successfully',
+            ),
             backgroundColor: AppTheme.successColor,
           ),
         );
         Navigator.pop(context, true);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating PM task: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not create PM task. Please try again.',
+          stackTrace: st,
+          contextLabel: 'CreatePmTask: create',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {

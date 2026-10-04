@@ -7,7 +7,7 @@ import '../../app/cmms_app_mode_scope.dart';
 import '../../config/cmms_app_mode.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../utils/app_theme.dart';
 import '../../config/app_config.dart';
 import '../../utils/legal_links.dart';
@@ -43,7 +43,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (mounted) setState(() {});
       return;
     }
-    final company = await SupabaseDatabaseService.instance.getCompanyById(id);
+    final company = await CmmsRepositories.users.getCompanyById(id);
     if (mounted) {
       setState(() {
         _companyName = company?.name;

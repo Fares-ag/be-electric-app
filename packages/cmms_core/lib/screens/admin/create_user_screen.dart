@@ -3,11 +3,12 @@ import 'package:provider/provider.dart';
 
 import '../../models/user.dart' as app_user;
 import '../../providers/unified_data_provider.dart';
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../services/user_auth_service.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/responsive_layout.dart';
 import '../../utils/data_integrity_guard.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CreateUserScreen extends StatefulWidget {
   const CreateUserScreen({
@@ -86,13 +87,13 @@ class _CreateUserScreenState extends State<CreateUserScreen> {
           role: widget.userRole,
           department: department.isEmpty ? null : department,
         );
-      } catch (e) {
+      } catch (e, st) {
         // Check if error is "email already in use"
         if (e.toString().contains('An account already exists for this email') ||
             e.toString().contains('email-already-in-use')) {
           // Check if user exists in Supabase
           final existingUser =
-              await SupabaseDatabaseService.instance.getUserByEmail(email);
+              await CmmsRepositories.users.getUserByEmail(email);
 
           if (existingUser != null) {
             // User exists in both Auth and Supabase - this is a real duplicate
@@ -143,14 +144,16 @@ class _CreateUserScreenState extends State<CreateUserScreen> {
         // Go back to user management
         Navigator.of(context).pop();
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating user: $e'),
-            backgroundColor: AppTheme.errorColor,
-            duration: const Duration(seconds: 5),
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not create user. Please try again.',
+          stackTrace: st,
+          contextLabel: 'CreateUser: create',
+          backgroundColor: AppTheme.errorColor,
+          duration: const Duration(seconds: 5),
         );
       }
     } finally {

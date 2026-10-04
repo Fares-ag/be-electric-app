@@ -4,14 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/app_config.dart';
+import '../../config/locator.dart';
 import '../../models/asset.dart';
 import '../../models/work_order.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
-import '../../services/supabase_storage_service.dart';
+import '../../repositories/cmms_repositories.dart';
+import '../../services/connectivity_service.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/offline_network.dart';
 import '../../widgets/asset_search_widget.dart';
 import '../../widgets/mobile_qr_scanner_widget.dart';
+import '../../utils/user_facing_errors.dart';
 
 class MobileCreateWorkRequestScreen extends StatefulWidget {
   const MobileCreateWorkRequestScreen({super.key});
@@ -124,30 +129,28 @@ class _MobileCreateWorkRequestScreenState
         listen: false,
       );
 
-      // Upload photo to Firebase Storage if one is selected
       var finalPhotoPath = _photoPath;
-      if (_photoPath != null) {
-        try {
-          final storageService = SupabaseStorageService();
-          await storageService.loadConfiguration();
+      final offlineMode = AppConfig.isOfflineModeEnabled;
+      final isOnline = sl<ConnectivityService>().isOnline;
+      final wasOffline = offlineMode && !isOnline;
 
-          // Convert path to XFile for web compatibility
+      if (_photoPath != null && !(offlineMode && !isOnline)) {
+        try {
+          final workOrderRepository = CmmsRepositories.workOrders;
           final photoFile = XFile(_photoPath!);
-          final uploadedUrl = await storageService.uploadWorkOrderPhoto(
+          final uploadedUrl = await workOrderRepository.uploadWorkOrderPhoto(
             photoFile: photoFile,
             workOrderId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
           );
 
           if (uploadedUrl != null) {
             finalPhotoPath = uploadedUrl;
-            // Photo uploaded successfully
-            print('✅ Photo uploaded to Firebase Storage: $uploadedUrl');
-          } else {
-            print('⚠️ Photo upload failed, using local path');
           }
-        } catch (e) {
-          print('⚠️ Photo upload error: $e, using local path');
-      }
+        } catch (e, st) {
+          if (offlineMode && isLikelyNetworkError(e)) {
+            finalPhotoPath = _photoPath;
+          }
+        }
       }
 
       await unifiedProvider.createWorkOrder(
@@ -164,20 +167,26 @@ class _MobileCreateWorkRequestScreenState
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Work request created successfully'),
+          SnackBar(
+            content: Text(
+              wasOffline
+                  ? 'Work order saved locally — will sync when online'
+                  : 'Work request created successfully',
+            ),
             backgroundColor: AppTheme.successColor,
           ),
         );
         Navigator.pop(context);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating work request: $e'),
-            backgroundColor: AppTheme.errorColor,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not create work request. Please try again.',
+          stackTrace: st,
+          contextLabel: 'mobile_create_work_request_screen: Could not create work request.',
+          backgroundColor: AppTheme.errorColor,
         );
       }
     } finally {

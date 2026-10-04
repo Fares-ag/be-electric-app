@@ -11,22 +11,47 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:universal_html/html.dart' as html;
 import '../models/work_order.dart';
+import '../utils/work_order_duration.dart';
 
 class WorkOrderCompletionReportService {
-  static pw.Font? _interRegular;
-  static pw.Font? _interBold;
+  static pw.Font? _suisseRegular;
+  static pw.Font? _suisseBold;
 
   static Future<void> _ensureFontsLoaded() async {
-    if (_interRegular != null && _interBold != null) return;
+    if (_suisseRegular != null && _suisseBold != null) return;
+    const regularPaths = [
+      'packages/cmms_core/assets/fonts/SuisseIntl-Regular.ttf',
+      'assets/fonts/SuisseIntl-Regular.ttf',
+      'packages/cmms_core/assets/fonts/SuisseIntl-Regular.otf',
+      'assets/fonts/SuisseIntl-Regular.otf',
+    ];
+    const boldPaths = [
+      'packages/cmms_core/assets/fonts/SuisseIntl-Bold.ttf',
+      'assets/fonts/SuisseIntl-Bold.ttf',
+      'packages/cmms_core/assets/fonts/SuisseIntl-Bold.otf',
+      'assets/fonts/SuisseIntl-Bold.otf',
+    ];
     try {
-      final regularData = await rootBundle.load('assets/fonts/Inter-Regular.ttf');
-      final boldData = await rootBundle.load('assets/fonts/Inter-Bold.ttf');
-      _interRegular = pw.Font.ttf(regularData);
-      _interBold = pw.Font.ttf(boldData);
+      final regularData = await _loadFirstAsset(regularPaths);
+      final boldData = await _loadFirstAsset(boldPaths);
+      _suisseRegular = pw.Font.ttf(regularData);
+      _suisseBold = pw.Font.ttf(boldData);
     } catch (_) {
-      _interRegular = pw.Font.helvetica();
-      _interBold = pw.Font.helveticaBold();
+      _suisseRegular = pw.Font.helvetica();
+      _suisseBold = pw.Font.helveticaBold();
     }
+  }
+
+  static Future<ByteData> _loadFirstAsset(List<String> paths) async {
+    Object? lastError;
+    for (final path in paths) {
+      try {
+        return await rootBundle.load(path);
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? StateError('Font asset not found');
   }
   /// Build PDF content
   static Future<void> _buildPdfContent(pw.Document pdf, WorkOrder workOrder) async {
@@ -36,8 +61,8 @@ class WorkOrderCompletionReportService {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         theme: pw.ThemeData.withFont(
-          base: _interRegular!,
-          bold: _interBold!,
+          base: _suisseRegular!,
+          bold: _suisseBold!,
         ),
         build: (context) => [
           // Beautiful Header with colored background
@@ -121,7 +146,7 @@ class WorkOrderCompletionReportService {
                       ...workOrder.assignedTechnicians!.map((tech) {
                         final effort = workOrder.technicianEffortMinutes?[tech.id];
                         final effortText = effort != null && effort > 0
-                            ? ' - ${_formatDuration(Duration(minutes: effort))}'
+                            ? ' - ${formatWorkDurationSeconds(effort * 60)}'
                             : '';
                         return pw.Container(
                           margin: const pw.EdgeInsets.only(bottom: 6),
@@ -198,30 +223,42 @@ class WorkOrderCompletionReportService {
                 if (workOrder.startedAt != null && workOrder.completedAt != null) ...[
                   _buildInfoRow(
                     'Total Duration',
-                    _formatDuration(workOrder.completedAt!.difference(workOrder.startedAt!)),
+                    formatWorkDurationSeconds(
+                      calculateWorkDurationSeconds(workOrder) ?? 0,
+                    ),
                   ),
                 ],
                 if (workOrder.startedAt != null) ...[
                   _buildInfoRow(
                     'Time to Start',
-                    _formatDuration(workOrder.startedAt!.difference(workOrder.createdAt)),
+                    formatWorkDurationSeconds(
+                      elapsedSecondsBetween(
+                        workOrder.createdAt,
+                        workOrder.startedAt!,
+                      ),
+                    ),
                   ),
                 ],
                 if (workOrder.completedAt != null) ...[
                   _buildInfoRow(
                     'Total Time',
-                    _formatDuration(workOrder.completedAt!.difference(workOrder.createdAt)),
+                    formatWorkDurationSeconds(
+                      elapsedSecondsBetween(
+                        workOrder.createdAt,
+                        workOrder.completedAt!,
+                      ),
+                    ),
                   ),
                 ],
                 if (workOrder.estimatedDuration != null)
                   _buildInfoRow(
                     'Estimated Duration',
-                    _formatDuration(workOrder.estimatedDuration!),
+                    formatWorkDuration(workOrder.estimatedDuration!),
                   ),
                 if (workOrder.actualDuration != null)
                   _buildInfoRow(
                     'Actual Duration',
-                    _formatDuration(workOrder.actualDuration!),
+                    formatWorkDuration(workOrder.actualDuration!),
                   ),
               ],
             ),
@@ -367,7 +404,9 @@ class WorkOrderCompletionReportService {
                         : null;
                     final reason = pause['reason'] as String? ?? 'No reason provided';
                     final duration = pausedAt != null && resumedAt != null
-                        ? _formatDuration(resumedAt.difference(pausedAt))
+                        ? formatWorkDurationSeconds(
+                            elapsedSecondsBetween(pausedAt, resumedAt),
+                          )
                         : 'Ongoing';
                     
                     return pw.Padding(
@@ -565,7 +604,7 @@ class WorkOrderCompletionReportService {
 
           print('✅ WorkOrderCompletionReportService: Report saved to $filePath');
           return filePath;
-        } catch (e) {
+        } catch (e, st) {
           // If getApplicationDocumentsDirectory fails, try using bytes method
           print('⚠️ WorkOrderCompletionReportService: Failed to get directory, error: $e');
           print('   This might be a platform-specific issue. Please ensure path_provider is properly configured.');
@@ -683,8 +722,9 @@ class WorkOrderCompletionReportService {
   /// Build summary cards with key metrics
   static pw.Widget _buildSummaryCards(WorkOrder workOrder) {
     final statusColor = workOrder.isCompleted ? PdfColors.green700 : PdfColors.orange700;
-    final duration = workOrder.startedAt != null && workOrder.completedAt != null
-        ? workOrder.completedAt!.difference(workOrder.startedAt!)
+    final durationSeconds = workOrder.startedAt != null &&
+            workOrder.completedAt != null
+        ? calculateWorkDurationSeconds(workOrder)
         : null;
     final totalCost = workOrder.totalCost ?? workOrder.actualCost;
     
@@ -704,8 +744,8 @@ class WorkOrderCompletionReportService {
         pw.Expanded(
           child: _buildSummaryCard(
             'Duration',
-            duration != null
-                ? _formatDuration(duration)
+            durationSeconds != null
+                ? formatWorkDurationSeconds(durationSeconds)
                 : (workOrder.startedAt != null ? 'In Progress' : 'Not Started'),
             PdfColors.blue700,
             0xe425, // timer
@@ -832,7 +872,7 @@ class WorkOrderCompletionReportService {
                     );
                   }
                 }
-              } catch (e) {
+              } catch (e, st) {
                 print('⚠️ Error loading signature image: $e');
               }
               
@@ -1012,15 +1052,4 @@ class WorkOrderCompletionReportService {
   static String _formatDate(DateTime date) =>
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} '
       '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-
-  static String _formatDuration(Duration duration) {
-    final totalSeconds = duration.inSeconds;
-    final hours = totalSeconds ~/ 3600;
-    final minutes = (totalSeconds % 3600) ~/ 60;
-    final seconds = totalSeconds % 60;
-    final hh = hours.toString().padLeft(2, '0');
-    final mm = minutes.toString().padLeft(2, '0');
-    final ss = seconds.toString().padLeft(2, '0');
-    return '$hh:$mm:$ss';
-  }
 }

@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import '../../utils/app_theme.dart';
+import '../../utils/user_facing_errors.dart';
 
 // Minimal inline stubs to satisfy lints; replace with real implementations if added later
 class DAMIntegrationService {
@@ -79,7 +80,7 @@ class _DAMIntegrationScreenState extends State<DAMIntegrationScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       setState(() {
         _connectionSuccessful = false;
         _connectionStatus = 'Connection error: $e';
@@ -109,13 +110,15 @@ class _DAMIntegrationScreenState extends State<DAMIntegrationScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error syncing assets: $e'),
-            backgroundColor: Colors.red,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not sync assets. Please try again.',
+          stackTrace: st,
+          contextLabel: 'DamIntegration: sync assets',
+          backgroundColor: Colors.red,
         );
       }
     } finally {

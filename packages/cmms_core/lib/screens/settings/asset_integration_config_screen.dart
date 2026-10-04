@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/hybrid_dam_service.dart';
 import '../../utils/app_theme.dart';
+import '../../config/locator.dart';
+import '../../utils/user_facing_errors.dart';
 
 class AssetIntegrationConfigScreen extends StatefulWidget {
   const AssetIntegrationConfigScreen({super.key});
@@ -36,7 +38,7 @@ class _AssetIntegrationConfigScreenState
         _enableApiFallback = prefs.getBool('asset_enable_api_fallback') ?? true;
         _enableCaching = prefs.getBool('asset_enable_caching') ?? true;
       });
-    } catch (e) {
+    } catch (e, st) {
       print('Error loading configuration: $e');
     } finally {
       setState(() {
@@ -57,7 +59,7 @@ class _AssetIntegrationConfigScreenState
       await prefs.setBool('asset_enable_caching', _enableCaching);
 
       // Apply configuration to Hybrid DAM Service
-      await HybridDamService().initialize();
+      await sl<HybridDamService>().initialize();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -67,13 +69,15 @@ class _AssetIntegrationConfigScreenState
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving configuration: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not save configuration. Please try again.',
+          stackTrace: st,
+          contextLabel: 'asset_integration_config_screen: Could not save configuration. ',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {
@@ -94,13 +98,15 @@ class _AssetIntegrationConfigScreenState
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error clearing cache: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not clear cache. Please try again.',
+          stackTrace: st,
+          contextLabel: 'asset_integration_config_screen: Could not clear cache. Please ',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }

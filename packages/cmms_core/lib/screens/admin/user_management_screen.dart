@@ -5,10 +5,11 @@ import '../../models/company.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../services/user_auth_service.dart';
 import '../../utils/app_theme.dart';
 import '../auth/login_screen.dart';
+import '../../utils/user_facing_errors.dart';
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({super.key});
@@ -479,13 +480,15 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating role: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not update role. Please try again.',
+          stackTrace: st,
+          contextLabel: 'UserManagement: update role',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -525,13 +528,15 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating status: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not update status. Please try again.',
+          stackTrace: st,
+          contextLabel: 'UserManagement: update status',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -548,13 +553,15 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error sending reset email: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not send reset email. Please try again.',
+          stackTrace: st,
+          contextLabel: 'UserManagement: reset email',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -624,7 +631,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -672,14 +679,14 @@ class _CreateUserScreenState extends State<CreateUserScreen> {
   Future<void> _loadCompanies() async {
     setState(() => _loadingCompanies = true);
     try {
-      final companies = await SupabaseDatabaseService.instance.getAllCompanies();
+      final companies = await CmmsRepositories.users.getAllCompanies();
       if (mounted) {
         setState(() {
           _companies = companies;
           _loadingCompanies = false;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
         setState(() => _loadingCompanies = false);
       }
@@ -746,13 +753,15 @@ class _CreateUserScreenState extends State<CreateUserScreen> {
         await _showCredentialsDialog(authResult);
         Navigator.pop(context, true);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating user account: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not create user account. Please try again.',
+          stackTrace: st,
+          contextLabel: 'UserManagement: create account',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     } finally {
@@ -784,12 +793,12 @@ class _CreateUserScreenState extends State<CreateUserScreen> {
             ? _workEmailController.text.trim()
             : null,
       );
-    } catch (e) {
+    } catch (e, st) {
       // Check if error is "email already in use"
       if (e.toString().contains('An account already exists for this email') ||
           e.toString().contains('email-already-in-use')) {
         // Check if user exists in Supabase
-        final existingUser = await SupabaseDatabaseService.instance.getUserByEmail(email);
+        final existingUser = await CmmsRepositories.users.getUserByEmail(email);
         
         if (existingUser != null) {
           // User exists in both Auth and Supabase - this is a real duplicate

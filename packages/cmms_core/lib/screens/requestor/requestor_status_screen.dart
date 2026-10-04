@@ -9,12 +9,14 @@ import '../../providers/unified_data_provider.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/requestor_home_navigation.dart';
 import '../../utils/requestor_status_loading.dart';
+import '../../utils/work_order_cancellation_notes.dart';
 import '../../utils/responsive_layout.dart';
 import '../../widgets/custom_app_bar.dart';
 import '../../widgets/reopen_work_order_dialog.dart';
 import '../../widgets/requestor_more_menu.dart';
 import '../work_orders/work_order_detail_screen.dart';
 import 'edit_request_screen.dart';
+import '../../utils/user_facing_errors.dart';
 
 class RequestorStatusScreen extends StatefulWidget {
   const RequestorStatusScreen({super.key});
@@ -36,8 +38,28 @@ class _RequestorStatusScreenState extends State<RequestorStatusScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _onRefresh();
+      _loadRequestorWorkOrders();
     });
+  }
+
+  Future<void> _loadRequestorWorkOrders() async {
+    final user =
+        Provider.of<AuthProvider>(context, listen: false).currentUser;
+    if (user == null || !mounted) return;
+
+    try {
+      await Provider.of<UnifiedDataProvider>(context, listen: false)
+          .loadRequestorWorkOrders(user.id);
+    } catch (e, st) {
+      if (!mounted) return;
+      showUserErrorSnackBar(
+        context,
+        e,
+        genericMessage: 'Could not load your requests. Pull down to retry.',
+        stackTrace: st,
+        contextLabel: 'RequestorStatus: load',
+      );
+    }
   }
 
   @override
@@ -48,11 +70,7 @@ class _RequestorStatusScreenState extends State<RequestorStatusScreen>
   }
 
   Future<void> _onRefresh() async {
-    final userId =
-        Provider.of<AuthProvider>(context, listen: false).currentUser?.id;
-    if (userId == null || userId.isEmpty) return;
-    await Provider.of<UnifiedDataProvider>(context, listen: false)
-        .loadRequestorWorkOrders(userId);
+    await _loadRequestorWorkOrders();
   }
 
   Widget _buildRefreshableBody({required Widget child}) {
@@ -1069,39 +1087,47 @@ class _RequestorStatusScreenState extends State<RequestorStatusScreen>
       ),
     );
 
-    if (confirmed == true && reasonController.text.trim().isNotEmpty) {
-      if (!mounted) return;
-      final unifiedProvider =
-          Provider.of<UnifiedDataProvider>(context, listen: false);
+    try {
+      if (confirmed == true && reasonController.text.trim().isNotEmpty) {
+        if (!mounted) return;
+        final unifiedProvider =
+            Provider.of<UnifiedDataProvider>(context, listen: false);
 
-      try {
-        final updatedWorkOrder = request.copyWith(
-          status: WorkOrderStatus.cancelled,
-          notes:
-              'Cancelled by requestor. Reason: ${reasonController.text.trim()}',
-          updatedAt: DateTime.now(),
+        try {
+          final updatedWorkOrder = request.copyWith(
+            status: WorkOrderStatus.cancelled,
+            notes: appendWorkOrderCancellationNote(
+              existingNotes: request.notes,
+              cancellationReason: reasonController.text,
+            ),
+            updatedAt: DateTime.now(),
+          );
+
+          await unifiedProvider.updateWorkOrder(updatedWorkOrder);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Request cancelled successfully'),
+                backgroundColor: AppTheme.accentGreen,
+              ),
+            );
+          }
+        } catch (e, st) {
+          if (mounted) {
+            showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not cancel request. Please try again.',
+          stackTrace: st,
+          contextLabel: 'RequestorStatus: cancel',
+          backgroundColor: AppTheme.accentRed,
         );
-
-        await unifiedProvider.updateWorkOrder(updatedWorkOrder);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Request cancelled successfully'),
-              backgroundColor: AppTheme.accentGreen,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error cancelling request: $e'),
-              backgroundColor: AppTheme.accentRed,
-            ),
-          );
+          }
         }
       }
+    } finally {
+      reasonController.dispose();
     }
   }
 
@@ -1157,7 +1183,7 @@ class _RequestorStatusScreenState extends State<RequestorStatusScreen>
       // The Selector should automatically update the UI since we called notifyListeners()
       // The reopened work order (status = open) will automatically disappear from History tab
       // and appear in Active tab due to the filtering logic
-    } on Exception catch (e) {
+    } on Exception catch (e, st) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

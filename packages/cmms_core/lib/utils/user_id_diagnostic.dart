@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../config/release_safety.dart';
 import '../providers/unified_data_provider.dart';
 import '../services/supabase_database_service.dart';
+import '../config/locator.dart';
 
 /// Diagnostic tool to show all user IDs and their assignments
 class UserIdDiagnostic {
   static Future<Map<String, dynamic>> analyzeUserIds() async {
     try {
       // Get all users from Firestore
-      final localUsers = await SupabaseDatabaseService.instance.getAllUsers();
+      final localUsers = await sl<SupabaseDatabaseService>().getAllUsers();
 
       final results = <String, dynamic>{
         'totalUsers': localUsers.length,
@@ -89,6 +91,8 @@ class UserIdDiagnostic {
     BuildContext context,
     UnifiedDataProvider provider,
   ) async {
+    if (!ReleaseSafety.showDevTools) return;
+
     showDialog(
       context: context,
       barrierDismissible: false,

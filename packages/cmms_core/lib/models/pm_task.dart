@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 
 import '../utils/deterministic_id_generator.dart';
@@ -17,6 +17,12 @@ enum PMTaskFrequency {
   asNeeded,
 }
 
+/// Legacy preventive maintenance task (`pm_tasks` table).
+///
+/// **Freeze policy (Option A migration):** maintenance-only — bug fixes and
+/// RLS/security patches allowed. Do not add new fields, provider methods,
+/// screens, or write paths here. New PM work uses `pm_schedules` +
+/// `pm_task_occurrences` surfaced via [PmWorkItem].
 class PMTask {
   PMTask({
     required this.id,

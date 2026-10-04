@@ -6,7 +6,10 @@ import 'package:cmms_core/models/work_order.dart';
 import 'package:cmms_core/providers/auth_provider.dart';
 import 'package:cmms_core/providers/unified_data_provider.dart';
 import 'package:cmms_core/services/parts_request_service.dart';
-import 'package:cmms_core/theme/app_theme.dart';
+import 'package:cmms_core/utils/app_theme.dart';
+import '../../config/locator.dart';
+import '../../utils/user_facing_errors.dart';
+import '../../widgets/offline_sync_banner.dart';
 
 class PartsRequestScreen extends StatefulWidget {
   const PartsRequestScreen({
@@ -20,7 +23,7 @@ class PartsRequestScreen extends StatefulWidget {
 }
 
 class _PartsRequestScreenState extends State<PartsRequestScreen> {
-  final PartsRequestService _partsRequestService = PartsRequestService();
+  final PartsRequestService _partsRequestService = sl<PartsRequestService>();
   final TextEditingController _quantityController = TextEditingController();
   final TextEditingController _reasonController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
@@ -60,8 +63,27 @@ class _PartsRequestScreenState extends State<PartsRequestScreen> {
         _inventoryItems = items;
         _partsRequests = requests;
       });
-    } catch (e) {
-      _showErrorSnackBar('Failed to load data: $e');
+
+      if (_partsRequestService.lastListFromCache && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _partsRequestService.lastListError ??
+                  'Showing cached parts requests. Cloud refresh failed.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e, st) {
+      showUserErrorSnackBar(
+        context,
+        e,
+        genericMessage: 'Could not load data. Please try again.',
+        stackTrace: st,
+        contextLabel: 'PartsRequestScreen: load data',
+      );
     } finally {
       setState(() => _isLoading = false);
     }
@@ -110,8 +132,14 @@ class _PartsRequestScreenState extends State<PartsRequestScreen> {
       _clearForm();
       await _loadData();
       _showSuccessSnackBar('Parts request created successfully');
-    } catch (e) {
-      _showErrorSnackBar('Failed to create parts request: $e');
+    } catch (e, st) {
+      showUserErrorSnackBar(
+        context,
+        e,
+        genericMessage: 'Could not create parts request. Please try again.',
+        stackTrace: st,
+        contextLabel: 'PartsRequestScreen: create request',
+      );
     } finally {
       setState(() => _isLoading = false);
     }
@@ -159,9 +187,9 @@ class _PartsRequestScreenState extends State<PartsRequestScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildWorkOrderInfo(),
-                    const SizedBox(height: AppTheme.spacingL),
+                    const SizedBox(height: AppTheme.spacingXL),
                     _buildPartsRequestForm(),
-                    const SizedBox(height: AppTheme.spacingL),
+                    const SizedBox(height: AppTheme.spacingXL),
                     _buildPartsRequestsList(),
                   ],
                 ),
@@ -285,7 +313,7 @@ class _PartsRequestScreenState extends State<PartsRequestScreen> {
                 maxLines: 2,
               ),
 
-              const SizedBox(height: AppTheme.spacingL),
+              const SizedBox(height: AppTheme.spacingXL),
 
               // Submit Button
               SizedBox(
@@ -313,7 +341,7 @@ class _PartsRequestScreenState extends State<PartsRequestScreen> {
       return Card(
         elevation: AppTheme.elevationS,
         child: Padding(
-          padding: const EdgeInsets.all(AppTheme.spacingL),
+          padding: const EdgeInsets.all(AppTheme.spacingXL),
           child: Center(
             child: Text(
               'No parts requests for this work order',
@@ -355,12 +383,18 @@ class _PartsRequestScreenState extends State<PartsRequestScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    request.inventoryItem?.name ?? 'Unknown Item',
-                    style: AppTheme.bodyText.copyWith(
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Text(
+                      request.inventoryItem?.name ?? 'Unknown Item',
+                      style: AppTheme.bodyText.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
+                  if (request.isOffline) ...[
+                    const PendingSyncChip(),
+                    const SizedBox(width: AppTheme.spacingS),
+                  ],
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppTheme.spacingS,

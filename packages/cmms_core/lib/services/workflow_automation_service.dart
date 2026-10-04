@@ -8,6 +8,7 @@ import '../models/user_role.dart';
 import '../models/work_order.dart';
 import 'enhanced_notification_service.dart';
 import 'unified_data_service.dart';
+import '../config/locator.dart';
 
 enum AutomationTrigger {
   workOrderCreated,
@@ -83,14 +84,10 @@ class AutomationExecution {
 }
 
 class WorkflowAutomationService {
-  factory WorkflowAutomationService() => _instance;
-  WorkflowAutomationService._internal();
-  static final WorkflowAutomationService _instance =
-      WorkflowAutomationService._internal();
 
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
   final EnhancedNotificationService _notificationService =
-      EnhancedNotificationService();
+      sl<EnhancedNotificationService>();
 
   final List<AutomationRule> _rules = [];
   final List<AutomationExecution> _executions = [];
@@ -299,7 +296,7 @@ class WorkflowAutomationService {
           await _executeActions(rule, itemId, itemType, context);
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('WorkflowAutomationService: Error executing automation: $e');
     }
   }
@@ -386,7 +383,7 @@ class WorkflowAutomationService {
       debugPrint(
         'WorkflowAutomationService: Executed rule ${rule.name} for $itemType $itemId',
       );
-    } catch (e) {
+    } catch (e, st) {
       execution.status = 'failed';
       execution.error = e.toString();
       debugPrint(

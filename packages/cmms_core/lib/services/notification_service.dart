@@ -1,10 +1,12 @@
-﻿// Notification Service - Handles system notifications and alerts
+// Notification Service - Handles system notifications and alerts
 
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../config/locator.dart';
 
 enum NotificationType {
   workOrderCreated,
@@ -109,13 +111,11 @@ class Notification {
 }
 
 class NotificationService {
-  factory NotificationService() => _instance;
-  NotificationService._internal();
-  static final NotificationService _instance = NotificationService._internal();
 
   final List<Notification> _notifications = [];
   final StreamController<List<Notification>> _notificationsController =
       StreamController<List<Notification>>.broadcast();
+  bool _isInitialized = false;
 
   Stream<List<Notification>> get notificationsStream =>
       _notificationsController.stream;
@@ -124,10 +124,15 @@ class NotificationService {
 
   int get unreadCount => _notifications.where((n) => !n.isRead).length;
 
-  /// Initialize the notification service
+  /// Loads persisted notifications once. Safe to call multiple times.
   Future<void> initialize() async {
+    if (_isInitialized) return;
+
     await _loadNotifications();
-    _notificationsController.add(_notifications);
+    if (!_notificationsController.isClosed) {
+      _notificationsController.add(_notifications);
+    }
+    _isInitialized = true;
   }
 
   /// Create a new notification
@@ -410,7 +415,7 @@ class NotificationService {
 
       // Sort by creation date (newest first)
       _notifications.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error loading notifications: $e');
     }
   }
@@ -423,7 +428,7 @@ class NotificationService {
         _notifications.map((n) => n.toMap()).toList(),
       );
       await prefs.setString('notifications', notificationsJson);
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error saving notifications: $e');
     }
   }
@@ -443,21 +448,25 @@ class NotificationService {
     String? payload,
   }) async {
     try {
-      final service = NotificationService();
-      await service.createNotification(
+      await sl<NotificationService>().createNotification(
         title: title,
         message: body,
         type: NotificationType.systemAlert,
         priority: NotificationPriority.medium,
         data: payload != null ? {'payload': payload} : null,
       );
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error showing local notification: $e');
     }
   }
 
-  /// Dispose resources
-  void dispose() {
-    _notificationsController.close();
+  /// Test-only reset. GetIt singletons must stay alive for the app lifetime.
+  @visibleForTesting
+  void resetForTesting() {
+    _isInitialized = false;
+    _notifications.clear();
+    if (!_notificationsController.isClosed) {
+      _notificationsController.add(_notifications);
+    }
   }
 }

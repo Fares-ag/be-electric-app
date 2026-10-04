@@ -20,7 +20,7 @@ class ApiTestService {
             : 'API connection failed',
         'body': response.body,
       };
-    } catch (e) {
+    } catch (e, st) {
       return {
         'success': false,
         'statusCode': 0,
@@ -48,7 +48,7 @@ class ApiTestService {
             : 'API key authentication failed',
         'body': response.body,
       };
-    } catch (e) {
+    } catch (e, st) {
       return {
         'success': false,
         'statusCode': 0,
@@ -76,7 +76,7 @@ class ApiTestService {
             : 'Bearer token authentication failed',
         'body': response.body,
       };
-    } catch (e) {
+    } catch (e, st) {
       return {
         'success': false,
         'statusCode': 0,
@@ -113,7 +113,7 @@ class ApiTestService {
         'body': response.body,
         'assetCount': assets.length,
       };
-    } catch (e) {
+    } catch (e, st) {
       return {
         'success': false,
         'statusCode': 0,

@@ -8,6 +8,7 @@ import '../screens/auth/wrong_app_role_screen.dart';
 import '../screens/dashboard/dashboard_screen.dart';
 import '../screens/requestor/requestor_main_screen.dart';
 import '../screens/technician/technician_main_screen.dart';
+import '../utils/app_role_policy.dart';
 
 class RoleBasedNavigation extends StatelessWidget {
   const RoleBasedNavigation({super.key, required this.appMode});
@@ -27,16 +28,15 @@ class RoleBasedNavigation extends StatelessWidget {
 
           final role = user.role.toLowerCase();
 
+          if (!isRoleAllowedForAppMode(role: role, appMode: appMode)) {
+            return WrongAppRoleScreen(
+              message: wrongAppRoleMessage(role: user.role, appMode: appMode),
+            );
+          }
+
           switch (appMode) {
             case CmmsAppMode.requestor:
-              if (role == 'requestor') {
-                return const RequestorMainScreen();
-              }
-              return WrongAppRoleScreen(
-                message:
-                    'This account (${user.role}) is not for the requestor app. '
-                    'Install the technician app, or use a requestor account.',
-              );
+              return const RequestorMainScreen();
             case CmmsAppMode.technician:
               switch (role) {
                 case 'technician':
@@ -44,11 +44,6 @@ class RoleBasedNavigation extends StatelessWidget {
                 case 'manager':
                 case 'admin':
                   return const AdminMainScreen();
-                case 'requestor':
-                  return const WrongAppRoleScreen(
-                    message:
-                        'This is a requestor account. Open the requestor app to create maintenance requests.',
-                  );
                 default:
                   return const DashboardScreen();
               }

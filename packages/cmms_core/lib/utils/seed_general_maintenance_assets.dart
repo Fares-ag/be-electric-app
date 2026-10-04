@@ -2,17 +2,23 @@
 // Run this once to populate the 9 facility infrastructure assets
 
 import 'package:flutter/material.dart';
+import '../config/release_safety.dart';
 import '../models/asset.dart';
 import '../services/unified_data_service.dart';
+import '../config/locator.dart';
 
 /// Seed general maintenance assets into the database
 /// This creates 9 facility infrastructure assets that can be used for
 /// maintenance work that isn't tied to specific equipment
 class GeneralMaintenanceAssetSeeder {
-  final UnifiedDataService _dataService = UnifiedDataService.instance;
+  UnifiedDataService get _dataService => sl<UnifiedDataService>();
 
   /// Run the seeder to create all general maintenance assets
   Future<List<Asset>> seedAssets() async {
+    if (!ReleaseSafety.allowDataSeeding) {
+      throw StateError('Asset seeding is disabled in release builds');
+    }
+
     debugPrint('ðŸŒ± Starting General Maintenance Assets Seeder...');
 
     final assets = _getGeneralMaintenanceAssets();
@@ -38,7 +44,7 @@ class GeneralMaintenanceAssetSeeder {
         await _dataService.createAsset(asset);
         createdAssets.add(asset);
         debugPrint('âœ… Created asset: ${asset.name} (${asset.id})');
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('âŒ Error creating asset ${asset.name}: $e');
       }
     }
@@ -234,7 +240,7 @@ class GeneralMaintenanceAssetSeeder {
         (asset) => asset.id.startsWith('FACILITY-'),
       );
       return facilityAssets.length >= 9;
-    } catch (e) {
+    } catch (e, st) {
       return false;
     }
   }
@@ -246,6 +252,10 @@ class GeneralMaintenanceAssetSeeder {
 
   /// Delete all general maintenance assets (for testing/cleanup)
   Future<void> deleteAllGeneralMaintenanceAssets() async {
+    if (!ReleaseSafety.allowDestructiveAdminTools) {
+      throw StateError('Asset deletion is disabled in release builds');
+    }
+
     debugPrint('ðŸ—‘ï¸  Deleting all general maintenance assets...');
 
     final facilityAssets = _dataService.assets
@@ -256,7 +266,7 @@ class GeneralMaintenanceAssetSeeder {
       try {
         await _dataService.deleteAsset(asset.id);
         debugPrint('ðŸ—‘ï¸  Deleted: ${asset.name}');
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('âŒ Error deleting ${asset.name}: $e');
       }
     }

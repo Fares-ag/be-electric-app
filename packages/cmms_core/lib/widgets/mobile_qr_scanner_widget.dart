@@ -1,22 +1,30 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../models/asset.dart';
+import '../providers/auth_provider.dart';
 import '../screens/assets/asset_detail_screen.dart';
 import '../screens/pm_tasks/create_pm_task_screen.dart';
 import '../screens/work_orders/create_work_request_screen.dart';
-import '../services/supabase_database_service.dart';
+import '../repositories/cmms_repositories.dart';
 import '../services/hybrid_dam_service.dart';
+import '../config/locator.dart';
+import '../utils/user_facing_errors.dart';
 
 class MobileQRScannerWidget extends StatefulWidget {
   const MobileQRScannerWidget({
     super.key,
     this.isRequestorMode = false,
     this.onQRCodeScanned,
+    this.returnResolvedAsset = false,
   });
   final bool isRequestorMode;
   final Function(String)? onQRCodeScanned;
+
+  /// When true, pop with the resolved [Asset] instead of opening a new create screen.
+  final bool returnResolvedAsset;
 
   @override
   State<MobileQRScannerWidget> createState() => _MobileQRScannerWidgetState();
@@ -161,7 +169,7 @@ class _MobileQRScannerWidgetState extends State<MobileQRScannerWidget> {
           }
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       // Not JSON, continue with other patterns
     }
 
@@ -279,12 +287,12 @@ class _MobileQRScannerWidgetState extends State<MobileQRScannerWidget> {
       Asset? asset;
       try {
         debugPrint('ðŸš€ Looking up asset using Hybrid DAM Service...');
-        final hybridService = HybridDamService();
+        final hybridService = sl<HybridDamService>();
         await hybridService.initialize();
         asset = await hybridService.getAssetByQRCode(itemId);
         debugPrint('ðŸš€ Hybrid DAM Service found asset: ${asset != null}');
         debugPrint('ðŸš€ Connection method: ${hybridService.connectionMethod}');
-      } catch (e) {
+      } catch (e, st) {
         debugPrint('âŒ Hybrid DAM Service error: $e');
       }
 
@@ -292,9 +300,9 @@ class _MobileQRScannerWidgetState extends State<MobileQRScannerWidget> {
       if (asset == null) {
         try {
           debugPrint('ðŸ“± Fallback to local database...');
-          asset = await SupabaseDatabaseService.instance.getAssetByQRCode(itemId);
+          asset = await CmmsRepositories.assets.getAssetByQRCode(itemId);
           debugPrint('ðŸ“± Local database found asset: ${asset != null}');
-        } catch (e) {
+        } catch (e, st) {
           debugPrint('âŒ Local database error: $e');
         }
       }
@@ -307,6 +315,10 @@ class _MobileQRScannerWidgetState extends State<MobileQRScannerWidget> {
       debugPrint('âœ… Final asset found: ${asset != null}');
 
       if (asset != null && mounted) {
+        if (widget.returnResolvedAsset) {
+          Navigator.pop(context, asset);
+          return;
+        }
         // Offer next actions: Create Work Order or PM Task for this asset
         await _showPostScanActionSheet(context, asset);
       } else if (mounted) {
@@ -317,14 +329,22 @@ class _MobileQRScannerWidgetState extends State<MobileQRScannerWidget> {
         // Resume scanning - disabled for web
         // controller?.start();
       }
-    } catch (e) {
+    } catch (e, st) {
       // Close loading dialog
       if (mounted) {
         Navigator.pop(context);
       }
 
       if (mounted) {
-        _showErrorDialog('Error', 'Failed to process QR code: $e');
+        _showErrorDialog(
+          'Error',
+          userFacingErrorMessage(
+            e,
+            genericMessage: 'Could not process QR code. Please try again.',
+            stackTrace: st,
+            contextLabel: 'MobileQrScanner: process QR',
+          ),
+        );
         // Resume scanning - disabled for web
         // controller?.start();
       }
@@ -334,6 +354,10 @@ class _MobileQRScannerWidgetState extends State<MobileQRScannerWidget> {
 
   Future<void> _showPostScanActionSheet(
       BuildContext context, Asset asset,) async {
+    final canCreatePmTask =
+        Provider.of<AuthProvider>(context, listen: false).currentUser?.canCreatePmTasks ??
+            false;
+
     final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -348,14 +372,15 @@ class _MobileQRScannerWidgetState extends State<MobileQRScannerWidget> {
                 Navigator.pop(ctx, 'work_order');
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.schedule),
-              title: const Text('Create PM Task'),
-              subtitle: Text('For asset: ${asset.name}'),
-              onTap: () {
-                Navigator.pop(ctx, 'pm_task');
-              },
-            ),
+            if (canCreatePmTask)
+              ListTile(
+                leading: const Icon(Icons.schedule),
+                title: const Text('Create PM Task'),
+                subtitle: Text('For asset: ${asset.name}'),
+                onTap: () {
+                  Navigator.pop(ctx, 'pm_task');
+                },
+              ),
             const Divider(height: 0),
             ListTile(
               leading: const Icon(Icons.info_outline),

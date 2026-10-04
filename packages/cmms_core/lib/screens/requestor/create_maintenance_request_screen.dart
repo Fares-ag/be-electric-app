@@ -4,7 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../models/asset.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/supabase_database_service.dart';
+import '../../repositories/cmms_repositories.dart';
+import '../../theme/design_tokens.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/charger_asset_filter.dart';
 import '../../utils/cmms_package_assets.dart';
@@ -14,6 +15,7 @@ import '../../widgets/custom_app_bar.dart';
 import '../../widgets/requestor_more_menu.dart';
 import 'requestor_status_screen.dart';
 import 'review_maintenance_request_screen.dart';
+import '../../utils/user_facing_errors.dart';
 
 class CreateMaintenanceRequestScreen extends StatefulWidget {
   const CreateMaintenanceRequestScreen({
@@ -52,6 +54,7 @@ class _CreateMaintenanceRequestScreenState
   // Photo upload
   final ImagePicker _picker = ImagePicker();
   List<XFile> _selectedPhotos = [];
+  List<Uint8List> _selectedPhotoBytes = [];
 
   @override
   void initState() {
@@ -91,6 +94,29 @@ class _CreateMaintenanceRequestScreenState
     super.dispose();
   }
 
+  Future<void> _addPhotos(List<XFile> photos) async {
+    if (photos.isEmpty || !mounted) return;
+
+    try {
+      final bytes = await Future.wait(photos.map((p) => p.readAsBytes()));
+      if (!mounted) return;
+      setState(() {
+        _selectedPhotos.addAll(photos);
+        _selectedPhotoBytes.addAll(bytes);
+      });
+    } catch (e, st) {
+      if (!mounted) return;
+      showUserErrorSnackBar(
+        context,
+        e,
+        genericMessage: 'Could not read the selected photo. Please try again.',
+        stackTrace: st,
+        contextLabel: 'create_maintenance_request_screen: photo bytes',
+        backgroundColor: AppTheme.accentRed,
+      );
+    }
+  }
+
   Future<void> _capturePhoto() async {
     try {
       final XFile? photo = await _picker.pickImage(
@@ -99,18 +125,18 @@ class _CreateMaintenanceRequestScreenState
         maxWidth: 1920,
       );
 
-      if (photo != null && mounted) {
-        setState(() {
-          _selectedPhotos.add(photo);
-        });
+      if (photo != null) {
+        await _addPhotos([photo]);
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error capturing photo: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not capture photo. Please try again.',
+          stackTrace: st,
+          contextLabel: 'create_maintenance_request_screen: Could not capture photo. Pleas',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -124,10 +150,8 @@ class _CreateMaintenanceRequestScreenState
         maxWidth: 1920,
       );
 
-      if (photos != null && photos.isNotEmpty && mounted) {
-        setState(() {
-          _selectedPhotos.addAll(photos);
-        });
+      if (photos != null && photos.isNotEmpty) {
+        await _addPhotos(photos);
       } else {
         // Fallback to single image picker if multi-image is not supported
         final XFile? photo = await _picker.pickImage(
@@ -136,13 +160,11 @@ class _CreateMaintenanceRequestScreenState
           maxWidth: 1920,
         );
 
-        if (photo != null && mounted) {
-          setState(() {
-            _selectedPhotos.add(photo);
-          });
+        if (photo != null) {
+          await _addPhotos([photo]);
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       // If multi-image fails, try single image picker
       try {
         final XFile? photo = await _picker.pickImage(
@@ -151,19 +173,19 @@ class _CreateMaintenanceRequestScreenState
           maxWidth: 1920,
         );
 
-        if (photo != null && mounted) {
-          setState(() {
-            _selectedPhotos.add(photo);
-          });
+        if (photo != null) {
+          await _addPhotos([photo]);
         }
-      } catch (e2) {
+      } catch (e2, st) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error picking photo: $e2'),
-              backgroundColor: AppTheme.accentRed,
-            ),
-          );
+          showUserErrorSnackBar(
+          context,
+          e2,
+          genericMessage: 'Could not pick photo. Please try again.',
+          stackTrace: st,
+          contextLabel: 'create_maintenance_request_screen: Could not pick photo. Please t',
+          backgroundColor: AppTheme.accentRed,
+        );
         }
       }
     }
@@ -173,6 +195,9 @@ class _CreateMaintenanceRequestScreenState
     if (mounted) {
       setState(() {
         _selectedPhotos.removeAt(index);
+        if (index < _selectedPhotoBytes.length) {
+          _selectedPhotoBytes.removeAt(index);
+        }
       });
     }
   }
@@ -713,7 +738,7 @@ class _CreateMaintenanceRequestScreenState
             hintText: hintText,
             hintStyle: TextStyle(
               color: Colors.grey[400],
-              fontFamily: 'Suisse Int\'l',
+              fontFamily: DesignTokens.fontFamily,
               fontSize: isDesktop ? 15 : 14,
             ),
             filled: true,
@@ -786,7 +811,7 @@ class _CreateMaintenanceRequestScreenState
             hintText: hintText,
             hintStyle: TextStyle(
               color: Colors.grey[400],
-              fontFamily: 'Suisse Int\'l',
+              fontFamily: DesignTokens.fontFamily,
               fontSize: isDesktop ? 15 : 14,
             ),
             filled: true,
@@ -881,23 +906,17 @@ class _CreateMaintenanceRequestScreenState
                         borderRadius: BorderRadius.circular(
                           isDesktop ? 8 : AppTheme.radiusS,
                         ),
-                        child: FutureBuilder<Uint8List>(
-                          future: _selectedPhotos[index].readAsBytes(),
-                          builder: (context, snapshot) {
-                            if (snapshot.hasData) {
-                              return Image.memory(
-                                snapshot.data!,
-                                height: photoSize,
-                                width: photoSize,
-                                fit: BoxFit.cover,
-                              );
-                            }
-                            return SizedBox(
+                        child: Image.memory(
+                          _selectedPhotoBytes[index],
+                          height: photoSize,
+                          width: photoSize,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
                               height: photoSize,
                               width: photoSize,
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
+                              color: Colors.grey[300],
+                              child: const Icon(Icons.broken_image_outlined),
                             );
                           },
                         ),
@@ -1020,11 +1039,11 @@ class _CreateMaintenanceRequestScreenState
         return;
       }
 
-      final company = await SupabaseDatabaseService.instance.getCompanyById(
+      final company = await CmmsRepositories.users.getCompanyById(
         companyId,
       );
       final allAssets =
-          await SupabaseDatabaseService.instance.getAssetsByCompanyId(
+          await CmmsRepositories.assets.getAssetsByCompanyId(
         companyId,
       );
       final chargers = allAssets.where((asset) {
@@ -1047,17 +1066,19 @@ class _CreateMaintenanceRequestScreenState
           }
         });
       }
-    } catch (e) {
+    } catch (e, st) {
       if (mounted) {
         setState(() {
           _isLoadingChargers = false;
           _chargersLoadAttempted = true;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading chargers: $e'),
-            backgroundColor: AppTheme.accentRed,
-          ),
+        showUserErrorSnackBar(
+          context,
+          e,
+          genericMessage: 'Could not load chargers. Please try again.',
+          stackTrace: st,
+          contextLabel: 'create_maintenance_request_screen: Could not load chargers. Pleas',
+          backgroundColor: AppTheme.accentRed,
         );
       }
     }
@@ -1106,14 +1127,12 @@ class _CreateMaintenanceRequestScreenState
           ),
         ],
 
-        // Manufacturer
-        if (asset.manufacturer != null && asset.manufacturer!.isNotEmpty) ...[
-          const SizedBox(height: AppTheme.spacingL),
-          _buildReadOnlyField(
-            label: 'MANUFACTURER',
-            value: asset.manufacturer!,
-          ),
-        ],
+        // Manufacturer (derived from charger name; matches Supabase trigger)
+        const SizedBox(height: AppTheme.spacingL),
+        _buildReadOnlyField(
+          label: 'MANUFACTURER',
+          value: resolveChargerManufacturer(asset),
+        ),
 
         // Model
         if (asset.model != null && asset.model!.isNotEmpty) ...[
@@ -1217,7 +1236,7 @@ class _CreateMaintenanceRequestScreenState
                 '${_companyChargers.length} charger${_companyChargers.length != 1 ? 's' : ''} available',
             hintStyle: TextStyle(
               color: Colors.grey[400],
-              fontFamily: 'Suisse Int\'l',
+              fontFamily: DesignTokens.fontFamily,
               fontSize: isDesktop ? 15 : 14,
             ),
             filled: true,
@@ -1376,6 +1395,7 @@ class _CreateMaintenanceRequestScreenState
             category: _selectedCategoryIssue ?? '',
             problemDescription: _problemDescriptionController.text.trim(),
             selectedPhotos: _selectedPhotos,
+            photoPreviewBytes: _selectedPhotoBytes,
             chargerType: _selectedCharger ?? '',
             chargerImagePath: chargerImagePath,
           ),

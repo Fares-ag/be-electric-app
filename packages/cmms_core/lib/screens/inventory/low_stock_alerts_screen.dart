@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cmms_core/models/inventory_item.dart';
 import 'package:cmms_core/providers/unified_data_provider.dart';
-import 'package:cmms_core/theme/app_theme.dart';
+import 'package:cmms_core/utils/app_theme.dart';
 import 'edit_inventory_item_screen.dart';
 
 class LowStockAlertsScreen extends StatefulWidget {
@@ -52,7 +52,7 @@ class _LowStockAlertsScreenState extends State<LowStockAlertsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildStatsCard(lowStockItems),
-                  const SizedBox(height: AppTheme.spacingL),
+                  const SizedBox(height: AppTheme.spacingXL),
                   _buildLowStockItemsList(lowStockItems),
                 ],
               ),
@@ -152,7 +152,7 @@ class _LowStockAlertsScreenState extends State<LowStockAlertsScreen> {
       return Card(
         elevation: AppTheme.elevationS,
         child: Padding(
-          padding: const EdgeInsets.all(AppTheme.spacingL),
+          padding: const EdgeInsets.all(AppTheme.spacingXL),
           child: Center(
             child: Column(
               children: [

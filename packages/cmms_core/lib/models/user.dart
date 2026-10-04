@@ -146,6 +146,9 @@ class User {
   bool get isAdmin => role == 'admin';
   bool get isAdminOrManager => role == 'admin' || role == 'manager';
 
+  /// Aligns with `pm_tasks` INSERT RLS (admin/manager only).
+  bool get canCreatePmTasks => isAdminOrManager;
+
   /// Convert User to Firestore map
   Map<String, dynamic> toFirestoreMap() => {
         'id': id,

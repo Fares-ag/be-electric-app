@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../models/asset.dart';
 import '../theme/unified_design_system.dart';
+import '../utils/charger_asset_filter.dart';
 
 class ProfessionalAssetDisplayWidget extends StatefulWidget {
   const ProfessionalAssetDisplayWidget({
@@ -272,8 +273,14 @@ class _ProfessionalAssetDisplayWidgetState
             _buildInfoRow('ID', widget.asset.id),
             if (widget.asset.category != null)
               _buildInfoRow('Category', widget.asset.category!),
-            if (widget.asset.manufacturer != null)
-              _buildInfoRow('Manufacturer', widget.asset.manufacturer!),
+            if (isChargerLikeAsset(widget.asset) ||
+                widget.asset.manufacturer != null)
+              _buildInfoRow(
+                'Manufacturer',
+                isChargerLikeAsset(widget.asset)
+                    ? resolveChargerManufacturer(widget.asset)
+                    : widget.asset.manufacturer!,
+              ),
             if (widget.asset.model != null)
               _buildInfoRow('Model', widget.asset.model!),
             if (widget.asset.serialNumber != null)

@@ -2,10 +2,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 class UniversalHyperSpeedCache {
-  factory UniversalHyperSpeedCache() => _instance;
-  UniversalHyperSpeedCache._internal();
-  static final UniversalHyperSpeedCache _instance =
-      UniversalHyperSpeedCache._internal();
 
   // In-memory cache for instant access
   static final Map<String, dynamic> _memoryCache = {};
@@ -57,7 +53,7 @@ class UniversalHyperSpeedCache {
           return data;
         }
       }
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸš€ HYPER SPEED: Error loading persistent cache for $key: $e');
     }
     return null;
@@ -78,7 +74,7 @@ class UniversalHyperSpeedCache {
         DateTime.now().toIso8601String(),
       );
       print('ðŸš€ HYPER SPEED: Cached $key in persistent storage');
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸš€ HYPER SPEED: Error caching persistent data for $key: $e');
     }
   }
@@ -139,7 +135,7 @@ class UniversalHyperSpeedCache {
         }
       }
       print('ðŸš€ HYPER SPEED: Cleared all caches');
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸš€ HYPER SPEED: Error clearing caches: $e');
     }
   }
@@ -165,7 +161,7 @@ class UniversalHyperSpeedCache {
       final data = await loader;
       await cacheDataWithHyperSpeed(key, data, toJson);
       print('ðŸš€ HYPER SPEED: Preloaded $key successfully');
-    } catch (e) {
+    } catch (e, st) {
       print('ðŸš€ HYPER SPEED: Error preloading $key: $e');
     }
   }

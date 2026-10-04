@@ -71,6 +71,7 @@ void validateWorkOrder(WorkOrder wo) {
 }
 
 void validatePMTask(PMTask task) {
+  // Legacy pm_tasks validation only — frozen schema; do not extend for Option A.
   if (task.taskName.trim().isEmpty) {
     throw Exception('PM task name is required');
   }
