@@ -372,7 +372,17 @@ class WorkOrderProvider with ChangeNotifier implements CmmsDomainProvider {
 
       final requestor = await _resolveRequestorForSubmit(requestorId);
 
-      final companyId = requestor.companyId;
+      final requestorRole = requestor.role.toLowerCase();
+      var companyId = requestor.companyId;
+      if (requestorRole == 'technician') {
+        final fromAsset = asset?.companyId?.trim();
+        if (fromAsset != null && fromAsset.isNotEmpty) {
+          companyId = fromAsset;
+        } else {
+          // Individual or unassigned charger — do not inherit staff account company.
+          companyId = null;
+        }
+      }
       final companyGate = validateRequestorCompanyAssignment(
         role: requestor.role,
         companyId: companyId,
@@ -381,7 +391,6 @@ class WorkOrderProvider with ChangeNotifier implements CmmsDomainProvider {
         throw StateError(companyGate.userMessage!);
       }
 
-      final requestorRole = requestor.role.toLowerCase();
       final assignedIds = <String>[];
       List<User>? assignedTechnicians;
 

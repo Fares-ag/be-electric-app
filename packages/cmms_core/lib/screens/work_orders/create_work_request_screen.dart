@@ -8,9 +8,11 @@ import 'package:uuid/uuid.dart';
 import '../../config/app_config.dart';
 import '../../config/locator.dart';
 import '../../models/asset.dart';
+import '../../models/company.dart';
 import '../../models/user.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/unified_data_provider.dart';
+import '../../repositories/cmms_repositories.dart';
 import '../../services/connectivity_service.dart';
 import '../../screens/assets/enhanced_asset_details_screen.dart';
 import '../../services/performance_service.dart';
@@ -55,9 +57,11 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
   final _serialNumberController = TextEditingController();
   final _assetTagController = TextEditingController();
 
-  // NEW: For requestors - manufacturer selection and charger dropdown
+  // Requestor: Siemens/Kostad. Technician: optional company filter, then charger.
   String? _selectedManufacturer; // 'Siemens' or 'Kostad'
-  List<Asset> _companyChargers = []; // Chargers filtered by company and manufacturer
+  String? _selectedCompanyId;
+  List<Company> _companies = [];
+  List<Asset> _companyChargers = [];
   bool _isLoadingChargers = false;
 
   @override
@@ -70,13 +74,19 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
       if (isChargerLikeAsset(widget.initialAsset!)) {
         _selectedManufacturer = createFormChargerBrand(widget.initialAsset!);
       }
+      final initialCompany = widget.initialAsset!.companyId?.trim();
+      if (initialCompany != null && initialCompany.isNotEmpty) {
+        _selectedCompanyId = initialCompany;
+      }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_selectedManufacturer != null) {
+      final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+      if (user?.role == 'technician') {
+        _loadCompanies();
+      } else if (_selectedManufacturer != null) {
         _loadCompanyChargers(_selectedManufacturer!);
       }
-      final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
       if (user != null) {
         setState(() {
           if (_requestorNameController.text.isEmpty) {
@@ -276,7 +286,7 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
           manufacturer: _selectedManufacturer!,
           serialNumber: _serialNumberController.text.trim(),
           assetTag: _assetTagController.text.trim(),
-          companyId: authProvider.currentUser?.companyId,
+          companyId: _selectedCompanyId,
         );
         try {
           final createdId = await sl<UnifiedDataService>().createAsset(draft);
@@ -418,6 +428,19 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                         const SizedBox(height: 16),
 
                         if (_isUnregisteredCharger) ...[
+                          Consumer<AuthProvider>(
+                            builder: (context, auth, _) {
+                              if (auth.currentUser?.role != 'technician') {
+                                return const SizedBox.shrink();
+                              }
+                              return Column(
+                                children: [
+                                  _buildCompanyDropdown(companyRequired: false),
+                                  const SizedBox(height: 16),
+                                ],
+                              );
+                            },
+                          ),
                           DropdownButtonFormField<String>(
                             initialValue: _selectedManufacturer,
                             decoration: const InputDecoration(
@@ -552,7 +575,9 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
                                       ),
                                       const SizedBox(height: 16),
                                     ],
-                                    _buildChargerSelection(),
+                                    _buildRoleChargerSelection(
+                                      isTechnician: isTechnician,
+                                    ),
                                   ],
                                 );
                               }
@@ -851,8 +876,21 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
       _selectedAsset = asset;
       _selectedAssetId = asset.id;
       _selectedManufacturer = createFormChargerBrand(asset);
+      final companyId = asset.companyId?.trim();
+      if (companyId != null && companyId.isNotEmpty) {
+        _selectedCompanyId = companyId;
+      } else {
+        _selectedCompanyId = null;
+      }
     });
-    _loadCompanyChargers(_selectedManufacturer!);
+    final isTechnician =
+        Provider.of<AuthProvider>(context, listen: false).currentUser?.role ==
+            'technician';
+    if (isTechnician) {
+      _loadChargersForSelectedCompany();
+    } else {
+      _loadCompanyChargers(_selectedManufacturer!);
+    }
   }
 
   // Handler for Enhanced Asset Selection
@@ -883,6 +921,202 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
   void _selectAsset() {
     // This will trigger the asset selection again
     // The button press will handle this
+  }
+
+  Widget _buildRoleChargerSelection({required bool isTechnician}) {
+    if (isTechnician) {
+      return _buildTechnicianCompanyChargerSelection();
+    }
+    return _buildChargerSelection();
+  }
+
+  Widget _buildCompanyDropdown({required bool companyRequired}) {
+    final selectedId = _companies.any((c) => c.id == _selectedCompanyId)
+        ? _selectedCompanyId
+        : null;
+    return DropdownButtonFormField<String?>(
+      key: ValueKey('company_${_companies.length}_$selectedId'),
+      initialValue: selectedId,
+      decoration: InputDecoration(
+        labelText: companyRequired ? 'Select Company *' : 'Company (optional)',
+        hintText: companyRequired
+            ? 'Choose a company'
+            : 'Filter by company, or leave blank',
+        border: const OutlineInputBorder(),
+        prefixIcon: const Icon(Icons.business),
+        helperText: companyRequired
+            ? null
+            : 'Leave blank for individual owners or to browse all chargers',
+      ),
+      items: [
+        if (!companyRequired)
+          const DropdownMenuItem<String?>(
+            value: null,
+            child: Text('All companies & individuals'),
+          ),
+        ..._companies.map(
+          (company) => DropdownMenuItem<String?>(
+            value: company.id,
+            child: Text(
+              company.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+      validator: companyRequired
+          ? (value) {
+              if (value == null || value.isEmpty) {
+                return 'Please select a company';
+              }
+              return null;
+            }
+          : null,
+      onChanged: (value) {
+        setState(() {
+          _selectedCompanyId = value;
+          if (!_isUnregisteredCharger) {
+            _selectedAsset = null;
+            _selectedAssetId = null;
+            _companyChargers = [];
+          }
+        });
+        if (!_isUnregisteredCharger) {
+          _loadChargersForSelectedCompany();
+        }
+      },
+    );
+  }
+
+  Widget _buildTechnicianCompanyChargerSelection() {
+    final filterKey = _selectedCompanyId ?? 'all';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildCompanyDropdown(companyRequired: false),
+        const SizedBox(height: 16),
+        if (_isLoadingChargers)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16.0),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (_companyChargers.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.orange[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange[200]!),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.orange[700]),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _selectedCompanyId == null
+                        ? 'No chargers found. Try field-add below or search assets.'
+                        : 'No chargers found for this company',
+                    style: TextStyle(color: Colors.orange[900]),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          _buildChargerDropdown(
+            keyPrefix: 'tech_$filterKey',
+          ),
+      ],
+    );
+  }
+
+  Widget _buildChargerDropdown({required String keyPrefix}) {
+    return DropdownButtonFormField<Asset>(
+      key: ValueKey(
+        '${keyPrefix}_${_selectedAsset?.id}_${_companyChargers.length}',
+      ),
+      initialValue: _companyChargers.contains(_selectedAsset)
+          ? _selectedAsset
+          : null,
+      decoration: InputDecoration(
+        labelText: 'Select Charger *',
+        hintText: 'Choose a charger',
+        border: const OutlineInputBorder(),
+        prefixIcon: const Icon(Icons.ev_station),
+        helperText:
+            '${_companyChargers.length} charger${_companyChargers.length != 1 ? 's' : ''} available',
+      ),
+      selectedItemBuilder: (context) => _companyChargers
+          .map(
+            (charger) => Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                charger.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          )
+          .toList(),
+      items: _companyChargers.map(_chargerMenuItem).toList(),
+      onChanged: (value) {
+        setState(() {
+          _selectedAsset = value;
+          _selectedAssetId = value?.id;
+          if (value != null) {
+            _selectedManufacturer = createFormChargerBrand(value);
+          }
+        });
+      },
+    );
+  }
+
+  DropdownMenuItem<Asset> _chargerMenuItem(Asset charger) {
+    final details = <String>[];
+    if (charger.qrCode != null && charger.qrCode!.isNotEmpty) {
+      details.add('Tag: ${charger.qrCode}');
+    }
+    if (charger.qrCodeId != null && charger.qrCodeId!.isNotEmpty) {
+      details.add('Asset #: ${charger.qrCodeId}');
+    }
+    if (charger.serialNumber != null && charger.serialNumber!.isNotEmpty) {
+      details.add('Serial: ${charger.serialNumber}');
+    }
+    if (charger.location.isNotEmpty) {
+      details.add('Location: ${charger.location}');
+    }
+    final detailText = details.isNotEmpty ? ' (${details.join(', ')})' : '';
+
+    return DropdownMenuItem<Asset>(
+      value: charger,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            charger.name,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+          if (detailText.isNotEmpty)
+            Text(
+              detailText,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildChargerSelection() {
@@ -1046,7 +1280,137 @@ class _CreateWorkRequestScreenState extends State<CreateWorkRequestScreen> {
     if (isRequestor) {
       return 'No $_selectedManufacturer chargers found for your company';
     }
-    return 'No $_selectedManufacturer chargers found';
+    return 'No chargers found for this company';
+  }
+
+  Future<void> _loadCompanies() async {
+    try {
+      var companies = await CmmsRepositories.users.getAllCompanies();
+      companies = companies.where((c) => c.isActive).toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+      if (companies.isEmpty && mounted) {
+        final assets =
+            Provider.of<UnifiedDataProvider>(context, listen: false).assets;
+        companies = _companiesFromAssets(assets);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _companies = companies;
+      });
+      if (!_isUnregisteredCharger) {
+        await _loadChargersForSelectedCompany();
+      }
+    } catch (e, st) {
+      if (!mounted) return;
+      showUserErrorSnackBar(
+        context,
+        e,
+        genericMessage: 'Could not load companies. Please try again.',
+        stackTrace: st,
+        contextLabel: 'create_work_request_screen: Could not load companies.',
+        backgroundColor: AppTheme.accentRed,
+      );
+    }
+  }
+
+  List<Company> _companiesFromAssets(Iterable<Asset> assets) {
+    final seen = <String>{};
+    final result = <Company>[];
+    for (final asset in assets) {
+      final id = asset.companyId?.trim();
+      if (id == null || id.isEmpty || !seen.add(id)) {
+        continue;
+      }
+      final label = _nonEmpty(asset.company) ?? id;
+      result.add(
+        Company(
+          id: id,
+          name: label,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+    result.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return result;
+  }
+
+  String? _nonEmpty(String? value) {
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  Future<void> _loadChargersForSelectedCompany() async {
+    final companyId = _selectedCompanyId?.trim();
+
+    setState(() {
+      _isLoadingChargers = true;
+      _companyChargers = [];
+    });
+
+    try {
+      final unifiedProvider =
+          Provider.of<UnifiedDataProvider>(context, listen: false);
+      Company? company;
+      if (companyId != null && companyId.isNotEmpty) {
+        for (final item in _companies) {
+          if (item.id == companyId) {
+            company = item;
+            break;
+          }
+        }
+      }
+      var assets = unifiedProvider.assets;
+      if (assets.isEmpty) {
+        await sl<UnifiedDataService>().refreshTechnicianSurface();
+        assets = unifiedProvider.assets;
+      }
+      if (assets.isEmpty) {
+        assets = await CmmsRepositories.assets.getAllAssets();
+      }
+      final chargers = chargersForTechnicianCreate(
+        assets: assets,
+        companyId: companyId,
+        resolvedCompanyName: company?.name,
+      );
+
+      if (!mounted) return;
+      final selectedId = _selectedAssetId ?? _selectedAsset?.id;
+      Asset? selectedInList;
+      if (selectedId != null) {
+        for (final charger in chargers) {
+          if (charger.id == selectedId) {
+            selectedInList = charger;
+            break;
+          }
+        }
+      }
+      setState(() {
+        _companyChargers = chargers;
+        _isLoadingChargers = false;
+        if (selectedInList != null) {
+          _selectedAsset = selectedInList;
+          _selectedAssetId = selectedInList.id;
+        }
+      });
+    } catch (e, st) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingChargers = false;
+      });
+      showUserErrorSnackBar(
+        context,
+        e,
+        genericMessage: 'Could not load chargers. Please try again.',
+        stackTrace: st,
+        contextLabel: 'create_work_request_screen: Could not load company chargers.',
+        backgroundColor: AppTheme.accentRed,
+      );
+    }
   }
 
   Future<void> _loadCompanyChargers(String manufacturer) async {

@@ -198,6 +198,51 @@ void main() {
       expect(result.map((a) => a.id), ['s1', 's2']);
     });
 
+    test('chargersForCompany lists all chargers for that company', () {
+      final result = chargersForCompany(
+        assets: [siemens, kostad, otherCompany, hvac],
+        companyId: 'co-1',
+      );
+
+      expect(result.map((a) => a.id), ['k1', 's1']);
+    });
+
+    test('chargersForCompany excludes other companies and non-chargers', () {
+      final result = chargersForCompany(
+        assets: [siemens, kostad, otherCompany, hvac],
+        companyId: 'co-2',
+      );
+
+      expect(result.map((a) => a.id), ['s2']);
+    });
+
+    test('chargersForTechnicianCreate without company lists all chargers', () {
+      final individual = charger(
+        id: 'ind-1',
+        name: 'Home EVSE',
+        manufacturer: 'Siemens',
+        companyId: '',
+      );
+      final result = chargersForTechnicianCreate(
+        assets: [siemens, kostad, otherCompany, hvac, individual],
+      );
+
+      expect(result.map((a) => a.id), ['ind-1', 'k1', 's1', 's2']);
+    });
+
+    test('chargersForTechnicianCreate with company matches chargersForCompany', () {
+      final fromHelper = chargersForTechnicianCreate(
+        assets: [siemens, kostad, otherCompany],
+        companyId: 'co-1',
+      );
+      final direct = chargersForCompany(
+        assets: [siemens, kostad, otherCompany],
+        companyId: 'co-1',
+      );
+
+      expect(fromHelper.map((a) => a.id), direct.map((a) => a.id));
+    });
+
     test('requestor catalog stays company-scoped', () {
       final result = chargersForCreateForm(
         assets: [siemens, kostad, otherCompany, hvac],

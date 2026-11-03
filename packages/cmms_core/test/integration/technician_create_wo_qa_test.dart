@@ -4,6 +4,7 @@ import 'package:cmms_core/utils/charger_asset_filter.dart';
 import 'package:cmms_core/utils/requestor_category_mapper.dart';
 import 'package:cmms_core/utils/technician_work_order_filter.dart';
 import 'package:cmms_core/utils/validators.dart';
+import 'package:cmms_core/utils/work_order_completion_policy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
 
@@ -304,6 +305,125 @@ void main() {
         isTechnicianView: false,
       );
       expect(reqList.map((w) => w.id), ['wo-req-vis']);
+    });
+  });
+
+  group('Company-first technician create through complete', () {
+    test('picker shows only chargers for the selected company', () {
+      final dfc = listedSiemensCharger(id: 'dfc-1');
+      final oasis = Asset(
+        id: 'oasis-1',
+        name: '60kW.DC Charger 01',
+        location: 'Doha Oasis',
+        manufacturer: 'Siemens',
+        status: 'active',
+        category: '60kW.DC',
+        itemType: '60kW.DC',
+        companyId: 'company-doha-oasis',
+        createdAt: DateTime(2024, 1, 1),
+        updatedAt: DateTime(2024, 1, 1),
+      );
+      final pump = Asset(
+        id: 'pump-1',
+        name: 'Lobby pump',
+        location: 'X',
+        status: 'active',
+        category: 'HVAC',
+        itemType: 'Pump',
+        companyId: companyId,
+        createdAt: DateTime(2024),
+        updatedAt: DateTime(2024),
+      );
+
+      final listed = chargersForCompany(
+        assets: [dfc, oasis, pump],
+        companyId: companyId,
+      );
+      expect(listed.map((a) => a.id), ['dfc-1']);
+    });
+
+    test('created WO inherits company from charger and is assigned', () {
+      final asset = listedSiemensCharger(id: 'asset_kos009220943qa');
+      final payload = buildTechnicianListedSubmission(
+        asset: asset,
+        problemDescription: 'QA-TECH-COMPANY-20261005 electrical fault details',
+      );
+      final wo = WorkOrder(
+        id: 'wo-qa-company',
+        ticketNumber: 'WO-QA-CO',
+        assetId: asset.id,
+        asset: asset,
+        companyId: asset.companyId,
+        problemDescription: payload['problemDescription'] as String,
+        requestorId: techId,
+        assignedTechnicianIds: [techId],
+        assignedAt: DateTime(2026, 10, 5),
+        status: WorkOrderStatus.assigned,
+        priority: payload['priority'] as WorkOrderPriority,
+        category: payload['category'] as RepairCategory,
+        notes: payload['notes'] as String,
+        createdAt: DateTime(2026, 10, 5),
+        updatedAt: DateTime(2026, 10, 5),
+      );
+
+      expect(() => validateWorkOrder(wo), returnsNormally);
+      expect(wo.companyId, companyId);
+      expect(wo.status, WorkOrderStatus.assigned);
+      expect(
+        workOrdersAssignedToTechnician([wo], techId).map((w) => w.id),
+        ['wo-qa-company'],
+      );
+    });
+
+    test('field-added charger keeps the selected company', () {
+      final draft = buildFieldAddedCharger(
+        id: 'field-co-1',
+        name: 'QA Field DFC',
+        location: 'Bay 4 QA',
+        manufacturer: 'Kostad',
+        companyId: companyId,
+      );
+      expect(draft.companyId, companyId);
+      expect(
+        chargersForCompany(assets: [draft], companyId: companyId)
+            .map((a) => a.id),
+        ['field-co-1'],
+      );
+    });
+
+    test('individual charger has no company and appears in unfiltered picker', () {
+      final individual = Asset(
+        id: 'ind-charger-1',
+        name: 'Villa wallbox',
+        location: 'Private residence',
+        manufacturer: 'Siemens',
+        status: 'active',
+        category: 'charger',
+        itemType: 'charger',
+        createdAt: DateTime(2024, 1, 1),
+        updatedAt: DateTime(2024, 1, 1),
+      );
+      final all = chargersForTechnicianCreate(
+        assets: [listedSiemensCharger(id: 'dfc-1'), individual],
+      );
+      expect(all.map((a) => a.id), contains('ind-charger-1'));
+      expect(
+        chargersForTechnicianCreate(
+          assets: [individual],
+          companyId: companyId,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('assigned ticket can complete with technician signature only', () {
+      expect(
+        WorkOrderCompletionPolicy.canSubmitTechnicianCompletion(
+          technicianSignature: 'data:image/png;base64,qa',
+          requestorSignature: null,
+        ),
+        isTrue,
+      );
     });
   });
 

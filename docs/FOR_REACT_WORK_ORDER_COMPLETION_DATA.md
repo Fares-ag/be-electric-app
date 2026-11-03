@@ -22,7 +22,7 @@ When the technician submits the completion form, Flutter builds an updated work 
 | **correctiveActions** | text | Optional | Free text from form. |
 | **recommendations** | text | Optional | Free text from form. |
 | **nextMaintenanceDate** | date/timestamp | Optional | Date picker; next suggested maintenance. |
-| **requestorSignature** | text | ✅ | Base64 or data URL from signature pad; required to submit. |
+| **requestorSignature** | text | Optional | Deferred; not collected on technician completion (T-004 Option A). |
 | **technicianSignature** | text | ✅ | Base64 or data URL from signature pad; required to submit. |
 | **laborCost** | numeric | Optional | From form (parsed as double). |
 | **partsCost** | numeric | Optional | From form (parsed as double). |
@@ -71,10 +71,10 @@ The completion screen collects:
 4. **Labor cost** – number (optional)  
 5. **Parts cost** – number (optional)  
 6. **Completion photos** – one or more images (camera or gallery); uploaded to Storage, then URLs stored as above  
-7. **Requestor signature** – required; signature widget → base64/data URL  
-8. **Technician signature** – required; signature widget → base64/data URL  
+7. **Technician signature** – required; signature widget → base64/data URL  
+8. **Requestor signature** – not collected on technician completion (T-004 Option A); column may remain null until a future requestor/admin sign-off flow  
 
-On submit, Flutter sets `status: 'completed'`, `completedAt: now`, and the fields in the table above, then calls `updateWorkOrder` so the row is updated in place. The `WorkOrder.toMap()` used for the update includes `nextMaintenanceDate`, `requestorSignature`, `technicianSignature`, `laborCost`, and `partsCost`, so these are persisted to `work_orders`.
+On submit, Flutter sets `status: 'completed'`, `completedAt: now`, and the fields in the table above, then calls `updateWorkOrder` so the row is updated in place. The `WorkOrder.toMap()` used for the update includes `nextMaintenanceDate`, `technicianSignature`, `laborCost`, and `partsCost`, so these are persisted to `work_orders`.
 
 ---
 

@@ -1,38 +1,75 @@
-# Technician offline: as-implemented vs as-advertised
+# Technician offline: field-day MVP
 
-**Date:** 2026-07-20  
-**Baseline:** Flutter `monorepo` @ `b7c1f71` (+ local WIP DI). Web not required for offline.
-
-## As-advertised
-
-- `AppConfig.isOfflineModeEnabled` defaults to `true` (`OFFLINE_MODE` dart-define).
-- Models carry `isOffline` / `lastSyncedAt`.
-- `SyncQueueService` exists with retry (max 3, every 2 minutes).
+**Date:** 2026-08-16 (Pass 4 — offline parity)  
+**Package:** `packages/cmms_core/`
 
 ## As-implemented
 
-| Area | Reality | Evidence |
-|------|---------|----------|
-| Offline flag | Config prints only; no write-path gate | `app_config.dart` `isOfflineModeEnabled` |
-| Sync queue | **Dead code** — registered in GetIt, never `addWorkOrderOperation` / `addOperation` from app flows | `sync_queue_service.dart`; repo-wide callers = none |
-| WO Start/Complete | Direct Supabase UPDATE; fails offline (no queue) | `unified_data_service` / `WorkOrderProvider` |
-| Parts create | Direct INSERT; throws if offline (`isOffline: true` only until cloud returns) | `parts_request_service.dart` |
-| Parts approve | Was false-success locally (fixed BE-QA-004) | same |
-| Local caches | SharedPreferences for parts prefs, enhanced notifications, queue JSON | prefs keys `parts_requests`, `sync_queue`, `enhanced_notifications` |
-| Photos | Upload requires network; completion may continue after upload fail (BE-QA-023 deferred) | completion screen |
-| Realtime | Channels drop offline; restart on provider re-init / auth — no dedicated reconnect queue | `RealtimeSupabaseService` |
-| Conflict rules | **None** — last successful cloud write wins; no merge | — |
+| Area | Behavior |
+|------|----------|
+| Kill switch | `--dart-define=OFFLINE_MODE=false` → fail-fast; no enqueue; `processQueue` no-ops |
+| Connectivity | `ConnectivityService` (+ `.instance` / GetIt same singleton) |
+| Sync queue | `OfflineQueueService` coalesce, photo-before-WO, atomic WO/PM completion |
+| WO Start / Complete / status | `updateWorkOrderOnlineOrQueue` inside `UnifiedDataService` |
+| PM Start / Complete | `offline_pm_task_mutation.dart` + atomic `completePMTask` queue ops |
+| Parts create | Online insert or enqueue via `resolveOfflineQueueService()` |
+| Surface cache | WO/PM SharedPreferences snapshots per user (`technician_*_surface_cache_*`) |
+| Asset disk cache | `HybridDamService` key `be_assets_disk_v1`; hydrate offline; prefetch on auth |
+| Session purge | `SessionPurgeService.purgeOnSessionEnd()` on logout clears queue, surface, DAM disk |
+| UX | `OfflineSyncGlobalBanner`, row badges via `OfflineSyncStatusProvider`, Sync queue screen |
 
-## Offline findings
+## Architecture notes
 
-| ID | Sev | Finding | Status |
-|----|-----|---------|--------|
-| BE-QA-OFF-001 | P1 | `SyncQueueService` never enqueued — offline WO/parts writes are not durable | Documented; full offline queue = larger project (Deferred) |
-| BE-QA-OFF-002 | P0 | Parts approve swallowed cloud errors + mutated local stock | **Fixed** (BE-QA-004) |
-| BE-QA-OFF-003 | P1 | `getAllPartsRequests` returned `[]` on error (looked empty) | **Fixed** (rethrows; service still prefs-fallback on catch) |
-| BE-QA-OFF-004 | P2 | `isOffline` on models not a cloud column for parts; never drives SyncQueue | Deferred |
-| BE-QA-OFF-005 | P2 | No offline banner / connectivity UX tied to `OFFLINE_MODE` | Deferred |
+- **Choke point:** `UnifiedDataService.updateWorkOrder` (not `WorkOrderProvider`) for WO offline enqueue.
+- **Reactive UI:** `OfflineSyncStatusProvider` listens to `ConnectivityService` + `OfflineQueueService.queueRevision`.
+- **Logout:** `AuthProvider.logout()` → `SessionPurgeService` → `CmmsDataCoordinator.purgeUserSession()` + queue/DAM/realtime teardown.
+- **Reconnect:** `CmmsDataCoordinator` runs `processQueue()` then `refreshTechnicianSurface()` when connectivity returns.
 
-## Field expectation (honest)
+## Airplane E2E checklist — Work orders
 
-Technician app is **online-first**. Airplane mode: reads may show last prefs/cache; writes should fail with errors (after BE-QA-004). Do not advertise durable offline field ops until SyncQueue is wired into WO/parts mutations.
+1. Sign in online; open assigned WO (cached in surface + asset disk).
+2. Airplane mode → orange global banner.
+3. Start Work → row shows **Pending sync** badge.
+4. Complete with note + photo → staged photos snackbar; badge remains.
+5. Create parts request → pending count increments in banner.
+6. Force-quit; reopen offline → Sync queue still has ops; WO list from surface cache.
+7. Restore network → ops flush; banner clears; cloud rows present.
+8. With network: Start/Complete/parts write immediately (no double rows).
+
+## PM offline scenarios
+
+| Step | Expected |
+|------|----------|
+| Online: open assigned PM task | Checklist + asset name visible |
+| Airplane: Start PM | Status → in progress locally; **Pending sync** badge on card |
+| Airplane: complete checklist + photo | Atomic `completePMTask` queued; legacy photo/update ops coalesced |
+| Kill app offline | PM task + queue survive via surface cache + SharedPreferences queue |
+| Relaunch offline | PM inbox shows local state; banner shows pending count |
+| Reconnect | Queue flushes; badge clears; server shows completed cycle |
+| Logout (online or offline) | Queue cleared; surface + `be_assets_disk_v1` purged; no prior-user data |
+
+## Kill / relaunch checklist
+
+- [ ] Pending queue count unchanged after force-quit
+- [ ] WO list renders from surface cache when offline at cold start
+- [ ] PM tasks render from surface cache when offline at cold start
+- [ ] Asset search / QR resolves from `be_assets_disk_v1` when offline
+- [ ] Logout → login as different user shows empty lists (no leak)
+- [ ] Logout clears sync queue screen (0 pending)
+- [ ] Reconnect auto-flushes without manual "Sync now" (banner button still works)
+
+## Tests
+
+- `test/utils/offline_sync_utils_test.dart`
+- `test/services/offline_queue_coalesce_test.dart`
+- `test/services/pm_task_offline_flow_test.dart`
+
+Run:
+
+```bash
+cd packages/cmms_core && flutter test test/utils/offline_sync_utils_test.dart test/services/offline_queue_coalesce_test.dart test/services/pm_task_offline_flow_test.dart
+```
+
+## Out of scope
+
+Requestor/admin offline, parts approve/fulfill offline, PM schedule edits, interactive merge, SQLite.

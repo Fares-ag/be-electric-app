@@ -1,0 +1,35 @@
+name: Integration tests
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+jobs:
+  requestor-auth-submit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/cmms_core
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run integration tests (always-on)
+        run: flutter test test/integration/ --reporter expanded
+
+      - name: Run integration tests with live Supabase (optional)
+        if: ${{ secrets.SUPABASE_URL != '' && secrets.SUPABASE_ANON_KEY != '' && secrets.INTEGRATION_REQUESTOR_EMAIL != '' && secrets.INTEGRATION_REQUESTOR_PASSWORD != '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          INTEGRATION_REQUESTOR_EMAIL: ${{ secrets.INTEGRATION_REQUESTOR_EMAIL }}
+          INTEGRATION_REQUESTOR_PASSWORD: ${{ secrets.INTEGRATION_REQUESTOR_PASSWORD }}
+        run: flutter test test/integration/requestor_supabase_live_integration_test.dart --reporter expanded

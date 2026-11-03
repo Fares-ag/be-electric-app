@@ -159,6 +159,48 @@ bool matchesChargerBrand(Asset asset, String brand) {
       (asset.model ?? '').toLowerCase().contains(b);
 }
 
+/// Chargers belonging to [companyId], regardless of Siemens/Kostad brand.
+List<Asset> chargersForCompany({
+  required Iterable<Asset> assets,
+  required String companyId,
+  String? resolvedCompanyName,
+}) {
+  final id = companyId.trim();
+  if (id.isEmpty) {
+    return const [];
+  }
+
+  return assets.where((asset) {
+    if (!isChargerLikeAsset(asset)) {
+      return false;
+    }
+    return assetBelongsToUserCompany(
+      asset,
+      id,
+      resolvedCompanyName: resolvedCompanyName,
+    );
+  }).toList()
+    ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+}
+
+/// Technician create form: optional [companyId] filter; when omitted, all chargers.
+List<Asset> chargersForTechnicianCreate({
+  required Iterable<Asset> assets,
+  String? companyId,
+  String? resolvedCompanyName,
+}) {
+  final id = companyId?.trim() ?? '';
+  if (id.isEmpty) {
+    return assets.where(isChargerLikeAsset).toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+  }
+  return chargersForCompany(
+    assets: assets,
+    companyId: id,
+    resolvedCompanyName: resolvedCompanyName,
+  );
+}
+
 /// Chargers shown on create-work-order: charger-like + brand, optionally company.
 List<Asset> chargersForCreateForm({
   required Iterable<Asset> assets,

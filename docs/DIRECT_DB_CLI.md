@@ -81,6 +81,18 @@ chmod +x scripts/db.sh
 ./scripts/db.sh query "SELECT count(*) FROM work_orders"
 ./scripts/db.sh run scripts/sql/app_review_checklist.sql
 ./scripts/db.sh run scripts/sql/list_chargers_by_company.sql
+
+# Be Electric Support (Know How / Commissioning)
+./scripts/db.sh migrate-support    # support_requests table + RLS + storage
+./scripts/db.sh migrate-pm-tasks-technician-update  # T-001: pm_tasks technician UPDATE RLS
+./scripts/db.sh migrate-inventory-technician-select  # T-002: inventory_items technician SELECT RLS
+./scripts/db.sh verify-inventory-technician-select   # confirm parts catalog policy
+./scripts/db.sh report-orphan-assignments            # T-003: read-only orphan WO/PM report
+./scripts/db.sh migrate-prevent-orphan-assignments   # T-003: scrub on delete + validation triggers
+./scripts/db.sh verify-orphan-assignments            # T-003: prevention + legacy orphan counts
+./scripts/db.sh verify-support
+./scripts/db.sh run scripts/sql/verify_requestor_backend.sql
+./scripts/db.sh support-requests   # recent rows
 ```
 
 ## 5. App Review demo setup (SQL Editor or CLI)

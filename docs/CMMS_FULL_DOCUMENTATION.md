@@ -214,18 +214,22 @@ Complete documentation for building the **React Web App** (Admin + Requestor) an
 | `pm_tasks` | Preventive maintenance tasks |
 | `users` | App users (linked to auth.users) |
 | `companies` | Multi-tenant organizations |
+| `support_requests` | Be Electric Know How / Commissioning (requestor app) |
+| `support_request_messages` | Admin support message threads (optional; FK may need restore) |
 | `inventory_items` | Parts and supplies |
 | `parts_requests` | Technician parts requests |
 | `purchase_orders` | Purchase orders |
 | `workflows` | Approval workflows |
 | `audit_events` | Audit log |
 | `escalation_events` | Escalations |
-| `notifications` | User notifications |
+| `notifications` | User notifications (server; requestor UI uses local prefs today) |
 | `vendors` | Vendor data |
+
+**Requestor app database map:** see [REQUESTOR_DATABASE.md](REQUESTOR_DATABASE.md).
 
 ### RLS (Row Level Security)
 
-- **Requestor:** Can read/write own work orders (requestorId = auth.uid)
+- **Requestor:** Can read/write own work orders (`requestorId = auth.uid()::text`); can INSERT/SELECT own `support_requests` (`createdBy = auth.uid()::text`)
 - **Technician:** Can read work orders where assignedTechnicianIds contains auth.uid
 - **Admin/Manager:** Can read/write all rows (company-scoped where applicable)
 - **Users table:** Lookup by email; RLS policies must avoid recursion (see `fix_users_rls_no_recursion.sql`)

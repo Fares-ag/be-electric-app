@@ -96,6 +96,15 @@ cd packages/cmms_core && dart run flutter_launcher_icons
 2. Runner → Signing & Capabilities: select **Team**, **Automatic** signing.
 3. `cd ios && pod install` after dependency changes.
 
+**OneDrive / cloud-synced repo:** If Xcode fails with `PhaseScriptExecution` / `resource fork, Finder information, or similar detritus not allowed` during codesign, the project is likely under OneDrive. Run once per app before building:
+
+```bash
+./scripts/prepare_ios_build_dir.sh requestor_cmms
+# or technician_cmms
+```
+
+That symlinks `apps/<app>/build` → `/tmp/be-electric-<app>-build` so Flutter/Xcode artifacts are written outside the synced folder. The “Update to recommended settings” prompts on Runner/Pods are optional Xcode warnings and are not the root cause.
+
 ### 2.2 Build IPA
 
 ```bash
@@ -117,7 +126,27 @@ flutter build ipa --release \
 
 Use Xcode Organizer, **Transporter**, or CLI upload with an App Store Connect API key.
 
-### 2.4 iOS checklist (detail)
+### 2.4 Xcode Run / Archive (dart-defines)
+
+**Xcode does not pass `--dart-define` flags.** Flutter reads them from `ios/Flutter/Generated.xcconfig`, which only exists after you run Flutter CLI with your defines file.
+
+Before opening Xcode (and again whenever you change `scripts/defines.production.json`):
+
+```bash
+# From repo root
+./scripts/prepare_xcode_ios.sh requestor_cmms          # Debug Run
+./scripts/prepare_xcode_ios.sh requestor_cmms --release   # Archive / IPA
+```
+
+Then in Xcode:
+
+1. Open `apps/requestor_cmms/ios/Runner.xcworkspace` (not `.xcodeproj`)
+2. **Product → Clean Build Folder** (⇧⌘K)
+3. **Run** (⌘R) or **Archive**
+
+Requestor overflow menu → **Preventive Maintenance** requires `ENABLE_PM_OCCURRENCES=true` in that generated config. If the menu is still missing, delete the app from the device/simulator and Run again.
+
+### 2.5 iOS checklist (detail)
 
 - [ ] `ExportOptions.plist` `teamID` is real (not placeholder).
 - [ ] `pod install` succeeds; open **workspace** in Xcode.
@@ -141,9 +170,12 @@ Use Xcode Organizer, **Transporter**, or CLI upload with an App Store Connect AP
 --dart-define=TERMS_OF_SERVICE_URL=https://your-domain.com/terms
 --dart-define=SUPPORT_URL=https://your-domain.com/support
 --dart-define=SUPPORT_EMAIL=support@your-domain.com
+--dart-define=ENABLE_PM_OCCURRENCES=true
 ```
 
-Or copy `scripts/defines.production.json.example` → `scripts/defines.production.json` with real values (never commit secrets).
+`ENABLE_PM_OCCURRENCES=true` turns on Option A PM: unified technician inbox (legacy + occurrences), occurrence completion, and requestor read-only PM. Set to `false` only if you have not migrated schedules/occurrences in Supabase yet. See `docs/PM_MIGRATION_GUIDE.md`.
+
+Or copy `scripts/defines.production.json.example` → `scripts/defines.production.json` with real values (never commit secrets). The example defaults `ENABLE_PM_OCCURRENCES` to `"true"`.
 
 ### 3.2 Repo scripts
 
@@ -169,6 +201,16 @@ Historical OneSignal docs (if you revive it): `docs/ONESIGNAL_SETUP.md`.
 - [ ] Photos / attachments work end-to-end.
 - [ ] App icon and display names correct.
 - [ ] No debug-only banners in release.
+- [ ] **Technician:** PM tab shows unified inbox; occurrence completion works when `ENABLE_PM_OCCURRENCES=true`.
+- [ ] **Requestor:** Overflow → Preventive Maintenance shows dashboard/lists (read-only; no Complete button).
+- [ ] **Requestor PM smoke test:**
+  - [ ] Open **Preventive Maintenance**
+  - [ ] Verify PM dashboard counts
+  - [ ] Open **Upcoming**
+  - [ ] Tap **Confirm** on an open PM task (list or detail)
+  - [ ] Verify **Confirmed** state appears
+  - [ ] Open **History** and verify completed/cancelled items
+  - [ ] Verify **no Complete button** on requestor PM detail
 
 ---
 

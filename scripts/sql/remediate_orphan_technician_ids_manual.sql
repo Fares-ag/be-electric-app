@@ -1,0 +1,36 @@
+-- T-003: Manual remediation for legacy orphan technician IDs (DO NOT RUN AUTOMATICALLY)
+--
+-- Use ONLY after reviewing:
+--   ./scripts/db.sh report-orphan-assignments
+--
+-- This file does NOT execute writes. Uncomment and run one block at a time in the
+-- Supabase SQL editor or via ./scripts/db.sh query, with explicit admin approval.
+--
+-- Option A — Remove dead IDs without assigning anyone (work orders become unassigned)
+--   Calls scrub_user_from_technician_assignments(); does NOT pick a replacement.
+--
+-- SELECT * FROM scrub_user_from_technician_assignments('14a37af3-a545-4b4d-8187-0cf59d579775');
+--
+-- Option B — Replace orphan with a specific live technician (manual reassignment)
+--   Run report-orphan-assignments for recommended_reassignment candidates first.
+--
+-- UPDATE work_orders
+-- SET
+--   "assignedTechnicianIds" = array_replace(
+--     COALESCE("assignedTechnicianIds", ARRAY[]::text[]),
+--     '14a37af3-a545-4b4d-8187-0cf59d579775',
+--     'b099a876-1d50-468c-bd7f-6960eecc74da'  -- example: fares@gmail.com
+--   ),
+--   "primaryTechnicianId" = CASE
+--     WHEN "primaryTechnicianId" = '14a37af3-a545-4b4d-8187-0cf59d579775'
+--       THEN 'b099a876-1d50-468c-bd7f-6960eecc74da'
+--     ELSE "primaryTechnicianId"
+--   END,
+--   "updatedAt" = now()
+-- WHERE id = '71cb6da0-4b2f-4825-ac03-31af93d47f49';  -- WO-1773280496462
+--
+-- Re-run verification after any manual change:
+--   ./scripts/db.sh verify-orphan-assignments
+
+SELECT 'remediation_templates_only' AS note,
+  'No writes in this file. See comments above.' AS status;
