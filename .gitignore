@@ -22,6 +22,9 @@
 *.aab
 *.ipa
 
+# Local tooling (e.g. downloaded gh CLI)
+.tools/
+
 # IDE
 .idea/
 .vscode/

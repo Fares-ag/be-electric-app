@@ -1,4 +1,4 @@
-# Be Electric - CMMS Mobile Application
+# be-electric-app — Be Electric CMMS Mobile Application
 
 A Flutter-based Computerized Maintenance Management System (CMMS) mobile application for EV charger maintenance management.
 

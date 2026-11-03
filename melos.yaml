@@ -1,4 +1,4 @@
-name: qauto_cmms_monorepo
+name: be_electric_app
 
 packages:
   - packages/**
